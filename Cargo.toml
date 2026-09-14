@@ -1,0 +1,11 @@
+[package]
+name = "rusty_cloud"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = "4.6.6"
+env_logger = "0.11.11"
+fuser = "0.18.0"
+libc = "0.2.189"
+log = "0.4.34"
