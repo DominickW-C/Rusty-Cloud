@@ -21,7 +21,8 @@ use fuser::{
     Config,
     SessionACL,
     Errno,
-    Generation
+    Generation,
+    FopenFlags
 };
 
 use std::collections::HashMap;
@@ -30,6 +31,9 @@ use std::time::UNIX_EPOCH;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::fmt;
+
+use std::sync::Mutex;
+
 
 //TESTING PURPOSES
 //see documentation for figuring out what these are again
@@ -75,21 +79,26 @@ enum NodeKind {
     //file data
     File { data: Vec<u8> },
     //if it was directory, name and inodeno
-    Directory { children: HashMap<String, u64> }
+    Directory { children: Mutex<HashMap<String, u64>> }
 }
 
 struct FileNode {
     attr: FileAttr,
-    file_type: NodeKind
+    file_type: NodeKind,
+    path: String
 }
 
 struct RustyCloud {
-    f_node: HashMap<fuser::INodeNo, FileNode>
+    f_node: Mutex<HashMap<fuser::INodeNo, FileNode>>,
+    next_inode: Mutex<u64>,
+    free_inode: Mutex<Vec<u64>>
 }
 
 impl RustyCloud {
     pub fn new() -> Self {
-        let mut f_node = HashMap::new();
+        let next_inode =  Mutex::new(2);
+        let free_inode = Mutex::new(Vec::new());
+        let f_node = Mutex::new(HashMap::new());
         let root_attr = FileAttr {
             ino: INodeNo(1),
             size: 0,
@@ -107,19 +116,21 @@ impl RustyCloud {
             blksize: 4096,
             flags: 0
         };
-        f_node.insert(fuser::INodeNo(1), FileNode {
+        f_node.lock().unwrap().insert(fuser::INodeNo(1), FileNode {
             attr: root_attr,
-            file_type: NodeKind::Directory { children: HashMap::new() }
+            file_type: NodeKind::Directory { children: Mutex::new(HashMap::new()) },
+            path: String::from("/") 
         });
 
-        Self { f_node }
+        Self { f_node, next_inode, free_inode }
     }
 }
 
 impl fmt::Display for RustyCloud {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let root_node = INodeNo(1); 
-        let root_file_node = match self.f_node.get(&root_node) {
+        let hash_m = self.f_node.lock().unwrap();
+        let root_file_node = match hash_m.get(&root_node) {
             Some(r) => r,
             None => {
                 return write!(f, "error displaying information") 
@@ -133,14 +144,47 @@ impl fmt::Display for RustyCloud {
     }
 }
 
+
+/*
+ * NOTE: work in progress, trying to figure out how to make this useful
+fn find_parent_node(fs: RustyCloud, parent_ino: INodeNo) -> Option<FileNode> {
+    match fs.f_node.get(&parent_ino) {
+        Some(parent) => {
+            match &parent.file_type {
+                NodeKind::Directory { .. } => {
+                    Some(*parent)
+                },
+                NodeKind::File { .. } => {
+                    println!("parent was a file, this should never happen");
+                    None
+                }
+            }
+        },
+        None => {
+            println!("error in find_parent_node");
+            println!("could not find parent f_node");
+            println!("parent ino {}", parent_ino);
+            None
+        }
+    }
+
+}
+*/
+
 impl Filesystem for RustyCloud {
+    //TODO: implement
+    fn setattr() {
+
+    }
+
     //NOTE: currently this gives an error with ls, i think its becasue the file is hard coded and
     //not in any struct
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         //find the parent file
-        match self.f_node.get(&parent) {
+        let hash_m = self.f_node.lock().unwrap();
+        match hash_m.get(&parent) {
             Some(parent) => {
-                //make sure the parent was a dir
+                //make sure the parent was a dir a
                 match &parent.file_type {
                     NodeKind::Directory { children } => {
                         //convert the OSstr to str
@@ -152,10 +196,11 @@ impl Filesystem for RustyCloud {
                             }
                         };
                         //find if child exists
-                        match children.get(name_str) {
+                        match children.lock().unwrap().get(name_str) {
                             Some(inum) => {
                                 let inode = INodeNo(*inum);
-                                let file_attr = match self.f_node.get(&inode) {
+                                let hash_m = self.f_node.lock().unwrap();
+                                let file_attr = match hash_m.get(&inode) {
                                     Some(r) => r.attr,
                                     None => {
                                         println!("lookup error, finding child attr");
@@ -193,7 +238,8 @@ impl Filesystem for RustyCloud {
     }
 
     fn getattr(&self, _req: &Request, ino: INodeNo, fh: Option<FileHandle>, reply: ReplyAttr) {
-        match self.f_node.get(&ino) {
+        let hash_m = self.f_node.lock().unwrap();
+        match hash_m.get(&ino) {
             Some(r) => {
                 println!("getattr found the inode {}", ino);
                 reply.attr(&TIMEOUT, &r.attr)
@@ -203,7 +249,13 @@ impl Filesystem for RustyCloud {
             }
         };
         /*
-        println!("{}", self);
+        println!("{}  let root_file_node = match self.f_node.get(&root_node) {
+
+            Some(r) => r,
+
+            None => write!(f, "error")
+
+        }; ", self);
         println!("inodeno: {}", ino);
         if ino == fuser::INodeNo(1) {
             reply.attr(&TIMEOUT, &ROOT_FILE_ATTR);
@@ -218,8 +270,67 @@ impl Filesystem for RustyCloud {
     }
 
     fn create(&self, _req: &Request, parent: INodeNo, name: &OsStr, mode: u32, umask: u32, flags: i32, reply: ReplyCreate) {
-        println!("create was called");
         println!("parent INode {}", parent);
+        println!("name of file is {:?}", name);
+        println!("mode is {}", mode);
+        println!("umask is {}", umask);
+        println!("flags is {}", flags);
+        //go to the parent node, create a child for it
+        //WARNING: DID THIS CREATE A LOCAL
+        let mut hash_m = self.f_node.lock().unwrap();
+        match hash_m.get(&parent) {
+            Some (p_result) => {
+                match &p_result.file_type {
+                    NodeKind::Directory { children } => {
+                        let str_name =  name.to_str().unwrap();
+                        let str_ret = String::from(str_name);
+                        let ino_num: u64;
+                        if self.free_inode.lock().unwrap().is_empty() {
+                            //have to use a new inode number
+                            println!("using new inode number");
+                            ino_num = *self.next_inode.lock().unwrap();
+                            children.lock().unwrap().insert(str_ret.clone(), ino_num);
+                            *self.next_inode.lock().unwrap() += 1;
+                        } else {
+                            //have an available inode, use that 
+                            println!("using available Inode number");
+                            let new_inode_index = self.free_inode.lock().unwrap().len() - 1;
+                            ino_num = self.free_inode.lock().unwrap()[new_inode_index];
+                            children.lock().unwrap().insert(str_ret.clone(), ino_num);
+                            self.free_inode.lock().unwrap().pop();
+                        }
+
+                        //should not have to worry about / since a directory will be made with one
+                        //at end 
+                        let parent_path = &p_result.path.clone();
+                        let file_path = parent_path.clone() + &str_ret;
+
+                        let new_file_node = FileNode {
+                                attr: TEST_FILE_ATTR,
+                                file_type: NodeKind::File { data: Vec::new() },
+                                path: file_path 
+                        };
+                        hash_m.insert(INodeNo(ino_num), new_file_node);
+                        //WARNING: might not like 0 as file handle
+                        reply.created(&TIMEOUT, &TEST_FILE_ATTR, Generation(0), FileHandle(0), FopenFlags::empty())
+                    } 
+                    NodeKind::File { .. } => {
+                        println!("parent was a file, should never happen");
+                        reply.error(Errno::ENOENT);
+                    }
+                }    
+            }
+            None => {
+                println!("parent node not found");
+                reply.error(Errno::ENOENT);
+            }
+        }
+
+        //create a new node for the file, updates its path
+
+
+
+
     }
     /*
     fn mknod(&self, _req: &Request, parent: INodeNo, name: &OsStr, mode: u32, umask: u32, rdev: u32, reply: ReplyEntry) {
