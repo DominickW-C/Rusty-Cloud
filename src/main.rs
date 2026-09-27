@@ -22,7 +22,9 @@ use fuser::{
     SessionACL,
     Errno,
     Generation,
-    FopenFlags
+    FopenFlags,
+    BsdFileFlags,
+    TimeOrNow
 };
 
 use std::collections::HashMap;
@@ -31,6 +33,7 @@ use std::time::UNIX_EPOCH;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::fmt;
+use std::time::SystemTime;
 
 use std::sync::Mutex;
 
@@ -172,11 +175,6 @@ fn find_parent_node(fs: RustyCloud, parent_ino: INodeNo) -> Option<FileNode> {
 */
 
 impl Filesystem for RustyCloud {
-    //TODO: implement
-    fn setattr() {
-
-    }
-
     //NOTE: currently this gives an error with ls, i think its becasue the file is hard coded and
     //not in any struct
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
@@ -267,6 +265,14 @@ impl Filesystem for RustyCloud {
             reply.error(Errno::ENOENT); 
         }
         */
+    }
+
+    fn setattr(&self, _req: &Request, ino: INodeNo, mode: Option<u32>, uid: Option<u32>, gid: Option<u32>, size: Option<u64>,
+               _attime: Option<TimeOrNow>, _mtime: Option<TimeOrNow>, _ctime: Option<SystemTime>, fh: Option<FileHandle>, _crtime: Option<SystemTime>,
+               _chgtime: Option<SystemTime>, _bkuptime: Option<SystemTime>, flags: Option<BsdFileFlags>, reply: ReplyAttr) {
+        println!("calling setattr");
+        reply.attr(&TIMEOUT, &TEST_FILE_ATTR);
+
     }
 
     fn create(&self, _req: &Request, parent: INodeNo, name: &OsStr, mode: u32, umask: u32, flags: i32, reply: ReplyCreate) {
@@ -378,9 +384,47 @@ impl Filesystem for RustyCloud {
     }
 
     fn readdir(&self, _req: &Request, ino: INodeNo, fh: FileHandle, offset: u64, mut reply: ReplyDirectory) {
-        if offset == 0 {
-            let _ = reply.add(INodeNo(2), 64, FileType::RegularFile, "test");
+        //TODO: Break out of loop if add is full? and then call this function again
+        println!("calling readdir on inode {}", ino);
+        println!("what is the offset? {}", offset);
+        //ino is the current directory we are in
+        //first get the parent 
+
+        //hashmap of f_nodes
+        let node_map = &self.f_node.lock().unwrap();
+
+        let mut current_offset = 0;
+        let parent_node = node_map.get(&ino).unwrap();
+        match &parent_node.file_type {
+            NodeKind::Directory { children } => {
+                let child_files = children.lock().unwrap().clone();
+                //string (name), u64 (inode)
+                for (name, ino) in child_files.iter() {
+                    //now get the type of file it is 
+                    let file_node = node_map.get(&INodeNo(*ino)).unwrap();
+                    match file_node.file_type {
+                        NodeKind::Directory { .. } => {
+                            reply.add(INodeNo(*ino), current_offset, FileType::Directory, name);
+                        }
+                        NodeKind::File { .. } => {
+                            reply.add(INodeNo(*ino), current_offset, FileType::RegularFile, name);
+                        }
+                    }
+                    current_offset += 1;
+                }
+            }
+            NodeKind::File { .. } => {
+                println!("not possible");
+                reply.error(Errno::ENOENT);
+            }
         }
+        
+        
+        /*
+        if offset == 0 {
+            let _ = reply.add(INodeNo(2), 1, FileType::RegularFile, "test");
+        }
+        */
         //doing reply.ok with no add causes it to stop
         reply.ok();
     }
