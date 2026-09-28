@@ -37,27 +37,15 @@ use std::time::SystemTime;
 
 use std::sync::Mutex;
 
+mod datatypes;
+use crate::datatypes::{
+    FileNode,
+    NodeKind,
+    RustyCloud
+};
 
 //TESTING PURPOSES
 //see documentation for figuring out what these are again
-const ROOT_FILE_ATTR: fuser::FileAttr = FileAttr {
-    ino: INodeNo(1),
-    size: 0,
-    blocks: 0,
-    atime: UNIX_EPOCH,
-    mtime: UNIX_EPOCH,
-    ctime: UNIX_EPOCH,
-    crtime:UNIX_EPOCH,
-    kind: FileType::Directory,
-    perm: 755,
-    nlink: 0,
-    uid: 0,
-    gid: 0,
-    rdev: 0,
-    blksize: 4096,
-    flags: 0
-};
-
 const TEST_FILE_ATTR: fuser::FileAttr = FileAttr {
     ino: INodeNo(2),
     size: 9,
@@ -77,25 +65,6 @@ const TEST_FILE_ATTR: fuser::FileAttr = FileAttr {
 };
 
 const TIMEOUT: time::Duration = time::Duration::new(2, 0);
-
-enum NodeKind {
-    //file data
-    File { data: Vec<u8> },
-    //if it was directory, name and inodeno
-    Directory { children: Mutex<HashMap<String, u64>> }
-}
-
-struct FileNode {
-    attr: FileAttr,
-    file_type: NodeKind,
-    path: String
-}
-
-struct RustyCloud {
-    f_node: Mutex<HashMap<fuser::INodeNo, FileNode>>,
-    next_inode: Mutex<u64>,
-    free_inode: Mutex<Vec<u64>>
-}
 
 impl RustyCloud {
     pub fn new() -> Self {
@@ -121,7 +90,7 @@ impl RustyCloud {
         };
         f_node.lock().unwrap().insert(fuser::INodeNo(1), FileNode {
             attr: root_attr,
-            file_type: NodeKind::Directory { children: Mutex::new(HashMap::new()) },
+            file_type: NodeKind::Directory { children: HashMap::new() },
             path: String::from("/") 
         });
 
@@ -178,6 +147,7 @@ impl Filesystem for RustyCloud {
     //NOTE: currently this gives an error with ls, i think its becasue the file is hard coded and
     //not in any struct
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
+        println!("calling lookup for parent: {:?} name {:?}", parent, name);
         //find the parent file
         let hash_m = self.f_node.lock().unwrap();
         match hash_m.get(&parent) {
@@ -194,15 +164,14 @@ impl Filesystem for RustyCloud {
                             }
                         };
                         //find if child exists
-                        match children.lock().unwrap().get(name_str) {
+                        match children.get(name_str) {
                             Some(inum) => {
                                 let inode = INodeNo(*inum);
-                                let hash_m = self.f_node.lock().unwrap();
                                 let file_attr = match hash_m.get(&inode) {
                                     Some(r) => r.attr,
                                     None => {
                                         println!("lookup error, finding child attr");
-                                        return
+                                        return reply.error(Errno::ENOENT);
                                     }
                                 };
                                 reply.entry(&TIMEOUT, &file_attr, Generation(0))
@@ -236,6 +205,7 @@ impl Filesystem for RustyCloud {
     }
 
     fn getattr(&self, _req: &Request, ino: INodeNo, fh: Option<FileHandle>, reply: ReplyAttr) {
+        println!("calling getattr for inode {:?}", ino);
         let hash_m = self.f_node.lock().unwrap();
         match hash_m.get(&ino) {
             Some(r) => {
@@ -284,9 +254,9 @@ impl Filesystem for RustyCloud {
         //go to the parent node, create a child for it
         //WARNING: DID THIS CREATE A LOCAL
         let mut hash_m = self.f_node.lock().unwrap();
-        match hash_m.get(&parent) {
+        match hash_m.get_mut(&parent) {
             Some (p_result) => {
-                match &p_result.file_type {
+                match &mut p_result.file_type {
                     NodeKind::Directory { children } => {
                         let str_name =  name.to_str().unwrap();
                         let str_ret = String::from(str_name);
@@ -295,14 +265,14 @@ impl Filesystem for RustyCloud {
                             //have to use a new inode number
                             println!("using new inode number");
                             ino_num = *self.next_inode.lock().unwrap();
-                            children.lock().unwrap().insert(str_ret.clone(), ino_num);
+                            children.insert(str_ret.clone(), ino_num);
                             *self.next_inode.lock().unwrap() += 1;
                         } else {
                             //have an available inode, use that 
                             println!("using available Inode number");
                             let new_inode_index = self.free_inode.lock().unwrap().len() - 1;
                             ino_num = self.free_inode.lock().unwrap()[new_inode_index];
-                            children.lock().unwrap().insert(str_ret.clone(), ino_num);
+                            children.insert(str_ret.clone(), ino_num);
                             self.free_inode.lock().unwrap().pop();
                         }
 
@@ -334,9 +304,6 @@ impl Filesystem for RustyCloud {
 
         //create a new node for the file, updates its path
 
-
-
-
     }
     /*
     fn mknod(&self, _req: &Request, parent: INodeNo, name: &OsStr, mode: u32, umask: u32, rdev: u32, reply: ReplyEntry) {
@@ -365,22 +332,38 @@ impl Filesystem for RustyCloud {
         println!("calling rename");
     }
 
-       fn open(&self, _req: &Request, _ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
-    //TODO: Implement
-    println!("calling open");
-       }
     */
+    fn open(&self, _req: &Request, _ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+        println!("flags are {:?}", flags);
+    }
 
     fn read(&self, _req: &Request, ino: INodeNo, fh: FileHandle, offset: u64, size: u32, 
         flags: OpenFlags, lock_owner: Option<LockOwner>, reply: ReplyData) {
         //TODO: Implement
         //NOTE: trying to read a file with size 0 does absolutely nothing
+        println!("read called from from ino: {:?}", ino);
+
+        let node_map = self.f_node.lock().unwrap();
+        //file def exists, just unwrap
+        let file_node = node_map.get(&ino).unwrap();
+        match &file_node.file_type {
+            NodeKind::File { data }=> {
+                reply.data(data);   
+            }
+            NodeKind::Directory { .. }=> {
+                println!("read error, reading a dir");
+                reply.error(Errno::ENOENT);
+            }
+        }; 
+         
+        /*
         println!("reading ");
         if ino == INodeNo(2) {
             println!("opening test file");
             let test_output = b"something";
             reply.data(test_output);
         }
+        */
     }
 
     fn readdir(&self, _req: &Request, ino: INodeNo, fh: FileHandle, offset: u64, mut reply: ReplyDirectory) {
@@ -392,26 +375,30 @@ impl Filesystem for RustyCloud {
 
         //hashmap of f_nodes
         let node_map = &self.f_node.lock().unwrap();
-
-        let mut current_offset = 0;
+        //parent node
         let parent_node = node_map.get(&ino).unwrap();
+
         match &parent_node.file_type {
             NodeKind::Directory { children } => {
-                let child_files = children.lock().unwrap().clone();
+                let child_files = children.clone();
                 //string (name), u64 (inode)
-                for (name, ino) in child_files.iter() {
+                for (i, (name, ino)) in child_files.iter().enumerate().skip(offset as usize) {
+                    println!("in loop, name: {}", name);
+                    println!("in loop, ino: {}", ino);
                     //now get the type of file it is 
                     let file_node = node_map.get(&INodeNo(*ino)).unwrap();
-                    match file_node.file_type {
-                        NodeKind::Directory { .. } => {
-                            reply.add(INodeNo(*ino), current_offset, FileType::Directory, name);
-                        }
-                        NodeKind::File { .. } => {
-                            reply.add(INodeNo(*ino), current_offset, FileType::RegularFile, name);
-                        }
+                    let ft = match file_node.file_type {
+                        NodeKind::Directory { .. } => FileType::Directory, 
+                        NodeKind::File { .. } => FileType::RegularFile 
+                    };
+                    let buffer_full = reply.add(INodeNo(*ino), (i + 1) as u64, ft, name);
+                    if buffer_full {
+                        break;
                     }
-                    current_offset += 1;
+
+
                 }
+                reply.ok();
             }
             NodeKind::File { .. } => {
                 println!("not possible");
@@ -426,7 +413,6 @@ impl Filesystem for RustyCloud {
         }
         */
         //doing reply.ok with no add causes it to stop
-        reply.ok();
     }
 
     fn write(&self, _req: &Request, ino: INodeNo, fh:FileHandle, offset: u64, data: &[u8], 
