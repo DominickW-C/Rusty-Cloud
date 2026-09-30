@@ -129,6 +129,23 @@ fn find_parent_node(fs: RustyCloud, parent_ino: INodeNo) -> Option<FileNode> {
 }
 */
 
+fn new_inode_no(fs: &RustyCloud) -> u64 {
+    let ino_num: u64;
+    if fs.free_inode.lock().unwrap().is_empty() {
+        //have to use a new inode number
+        println!("using new inode number");
+        ino_num = *fs.next_inode.lock().unwrap();
+        *fs.next_inode.lock().unwrap() += 1;
+    } else {
+        //have an available inode, use that 
+        println!("using available Inode number");
+        let new_inode_index = fs.free_inode.lock().unwrap().len() - 1;
+        ino_num = fs.free_inode.lock().unwrap()[new_inode_index];
+        fs.free_inode.lock().unwrap().pop();
+    }
+    ino_num
+}
+
 impl Filesystem for RustyCloud {
     //not in any struct
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
@@ -192,12 +209,12 @@ impl Filesystem for RustyCloud {
 
 
         /*
-        if OsStr::eq_ignore_ascii_case(name, "test") {
-            println!("lookup found test file"); 
-            reply.entry(&TIMEOUT, &TEST_FILE_ATTR, Generation(0)); 
-        }
-        println!("looking for {:?}", name);
-        */
+           if OsStr::eq_ignore_ascii_case(name, "test") {
+           println!("lookup found test file"); 
+           reply.entry(&TIMEOUT, &TEST_FILE_ATTR, Generation(0)); 
+           }
+           println!("looking for {:?}", name);
+           */
     }
 
     fn getattr(&self, _req: &Request, ino: INodeNo, fh: Option<FileHandle>, reply: ReplyAttr) {
@@ -243,12 +260,27 @@ impl Filesystem for RustyCloud {
                _attime: Option<TimeOrNow>, _mtime: Option<TimeOrNow>, _ctime: Option<SystemTime>, fh: Option<FileHandle>, _crtime: Option<SystemTime>,
                _chgtime: Option<SystemTime>, _bkuptime: Option<SystemTime>, flags: Option<BsdFileFlags>, reply: ReplyAttr) {
 
+        println!("calling setattr");
+        println!("size was {:?}", size);
         let mut hash_m = self.f_node.lock().unwrap();
         //NOTE:: could be a pointless match
         //TODO: add to this
         match hash_m.get_mut(&ino) {
             Some(node) => {
-                reply.attr(&TIMEOUT, &node.attr);
+                //size can be none
+                match size {
+                    Some(re) => {
+                        node.attr.size = re;
+                        match &mut node.file_type {
+                            NodeKind::File { file_data } => {
+                                file_data.resize(re as usize, 0);                  
+                                reply.attr(&TIMEOUT, &node.attr)
+                            }
+                            NodeKind::Directory { .. } => reply.attr(&TIMEOUT, &node.attr)
+                        }
+                    }
+                    None => reply.attr(&TIMEOUT, &node.attr)
+                }
             }
             None => {
                 println!("setattr error, to inode found matching");
@@ -273,7 +305,9 @@ impl Filesystem for RustyCloud {
                     NodeKind::Directory { children } => {
                         let str_name =  name.to_str().unwrap();
                         let str_ret = String::from(str_name);
-                        let ino_num: u64;
+                        let ino_num: u64 = new_inode_no(self);
+                        children.insert(str_ret.clone(), ino_num);
+                        /*
                         if self.free_inode.lock().unwrap().is_empty() {
                             //have to use a new inode number
                             println!("using new inode number");
@@ -288,6 +322,7 @@ impl Filesystem for RustyCloud {
                             children.insert(str_ret.clone(), ino_num);
                             self.free_inode.lock().unwrap().pop();
                         }
+                        */
 
                         //should not have to worry about / since a directory will be made with one
                         //at end 
@@ -338,15 +373,56 @@ impl Filesystem for RustyCloud {
         //create a new node for the file, updates its path
 
     }
+
+    fn mkdir(&self, _req: &Request, parent: INodeNo, name: &OsStr, mode: u32, umask: u32, reply: ReplyEntry) {
+        println!("calling mkdir");
+
+        let mut node_map = self.f_node.lock().unwrap();
+        match node_map.get_mut(&parent) {
+            Some(parent) => {
+                match &mut parent.file_type {
+                    NodeKind::Directory { children } => {
+                        let str_name =  name.to_str().unwrap();
+                        let str_ret = String::from(str_name);
+                        let ino_num: u64 = new_inode_no(self); 
+                        children.insert(str_ret.clone(), ino_num);
+
+                        let new_directory_attr: fuser::FileAttr = FileAttr {
+                            ino: INodeNo(ino_num),
+                            size: 0,
+                            blocks: 0,
+                            atime: UNIX_EPOCH,
+                            mtime: UNIX_EPOCH,
+                            ctime: UNIX_EPOCH,
+                            crtime:UNIX_EPOCH,
+                            kind: FileType::Directory,
+                            perm: 755,
+                            nlink: 0,
+                            uid: 0,
+                            gid: 0,
+                            rdev: 0,
+                            blksize: 4096,
+                            flags: 0
+                        };        
+                        reply.entry(&TIMEOUT, &new_directory_attr, Generation(0));
+                    }
+                    NodeKind::File { .. } => {
+                        println!("parent was a file, not possible");
+                        reply.error(Errno::ENOENT);
+                    }
+                }
+
+            }
+            None => {
+                println!("could not find the parent node, should never happen");
+                reply.error(Errno::ENOENT);
+            }
+        }
+    }
     /*
        fn mknod(&self, _req: &Request, parent: INodeNo, name: &OsStr, mode: u32, umask: u32, rdev: u32, reply: ReplyEntry) {
     //TODO: Implement
     println!("calling mknod");
-       }
-
-       fn mkdir(&self, _req: &Request, parent: INodeNo, name: &OsStr, mode: u32, umask: u32, reply: ReplyEntry) {
-    //TODO: Implement
-    println!("calling mkdir");
        }
 
        fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
@@ -402,7 +478,7 @@ impl Filesystem for RustyCloud {
            let test_output = b"something";
            reply.data(test_output);
            }
-        */
+           */
     }
 
     fn readdir(&self, _req: &Request, ino: INodeNo, fh: FileHandle, offset: u64, mut reply: ReplyDirectory) {
@@ -444,13 +520,13 @@ impl Filesystem for RustyCloud {
                 reply.error(Errno::ENOENT);
             }
         }
-        
-        
+
+
         /*
-        if offset == 0 {
-            let _ = reply.add(INodeNo(2), 1, FileType::RegularFile, "test");
-        }
-        */
+           if offset == 0 {
+           let _ = reply.add(INodeNo(2), 1, FileType::RegularFile, "test");
+           }
+           */
         //doing reply.ok with no add causes it to stop
     }
 
@@ -466,8 +542,10 @@ impl Filesystem for RustyCloud {
             Some(node) => {
                 match &mut node.file_type {
                     NodeKind::File { file_data } => {
-                        file_data.push(b'2');
-                        reply.written(1);
+                        for ch in data.iter() {
+                            file_data.push(*ch);
+                        }
+                        reply.written(data.len() as u32);
                     }
                     NodeKind::Directory { .. } => {
                         println!("can't write to a dir");
@@ -491,7 +569,7 @@ fn main () {
     let mut options = Config::default();
     //changes the mount_options to auto unmount
     options.mount_options = vec![
-            MountOption::AutoUnmount
+        MountOption::AutoUnmount
     ];
     //lets any user access the filesystem
     options.acl = SessionACL::All;
@@ -505,6 +583,6 @@ fn main () {
         println!("{}", e);
     }
 
-    
+
     println!("test");
 }
