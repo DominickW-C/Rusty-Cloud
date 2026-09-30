@@ -146,6 +146,37 @@ fn new_inode_no(fs: &RustyCloud) -> u64 {
     ino_num
 }
 
+fn new_file_node(new_attr: &FileAttr, parent_path: &String, node_name: &String) -> Option<FileNode> {
+    let mut file_path = parent_path.clone() + &node_name;    
+    let new_f_node: FileNode;
+
+    match new_attr.kind {
+        FileType::Directory => {
+            file_path = file_path.clone() + &"/";
+            new_f_node = FileNode {
+                attr: *new_attr,
+                file_type: NodeKind::Directory { children: HashMap::new() },
+                path: file_path 
+            };
+        } 
+        FileType::RegularFile => {
+            new_f_node = FileNode {
+                attr: *new_attr,
+                file_type: NodeKind::File { file_data: Vec::new() },
+                path: file_path 
+            };
+        } 
+        FileType::NamedPipe | FileType::CharDevice | FileType::BlockDevice | FileType::Symlink | FileType::Socket => {
+            println!("ERROR, BAD THING HAPPENED");
+            println!("NOT IMPLEMENTED FOR NAMED PIPES, CHAR DEVICES, etc");
+            println!("SEE new_file_node");
+            return None
+        }
+
+    }
+    Some(new_f_node)
+}
+
 impl Filesystem for RustyCloud {
     //not in any struct
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
@@ -303,32 +334,12 @@ impl Filesystem for RustyCloud {
             Some (p_result) => {
                 match &mut p_result.file_type {
                     NodeKind::Directory { children } => {
+                        //TODO: clean up var names
                         let str_name =  name.to_str().unwrap();
                         let str_ret = String::from(str_name);
                         let ino_num: u64 = new_inode_no(self);
                         children.insert(str_ret.clone(), ino_num);
-                        /*
-                        if self.free_inode.lock().unwrap().is_empty() {
-                            //have to use a new inode number
-                            println!("using new inode number");
-                            ino_num = *self.next_inode.lock().unwrap();
-                            children.insert(str_ret.clone(), ino_num);
-                            *self.next_inode.lock().unwrap() += 1;
-                        } else {
-                            //have an available inode, use that 
-                            println!("using available Inode number");
-                            let new_inode_index = self.free_inode.lock().unwrap().len() - 1;
-                            ino_num = self.free_inode.lock().unwrap()[new_inode_index];
-                            children.insert(str_ret.clone(), ino_num);
-                            self.free_inode.lock().unwrap().pop();
-                        }
-                        */
-
-                        //should not have to worry about / since a directory will be made with one
-                        //at end 
-                        let parent_path = &p_result.path.clone();
-                        let file_path = parent_path.clone() + &str_ret;
-
+                                        
                         let new_file_attr: fuser::FileAttr = FileAttr {
                             ino: INodeNo(ino_num),
                             size: 0,
@@ -346,13 +357,8 @@ impl Filesystem for RustyCloud {
                             blksize: 4096,
                             flags: 0
                         };
-
-                        let new_file_node = FileNode {
-                                attr: new_file_attr,
-                                file_type: NodeKind::File { file_data: Vec::new() },
-                                path: file_path 
-                        };
-                        hash_m.insert(INodeNo(ino_num), new_file_node);
+                        let new_f_node: FileNode = new_file_node(&new_file_attr, &p_result.path.clone(), &str_ret).unwrap();
+                        hash_m.insert(INodeNo(ino_num), new_f_node);
                         
 
                         //WARNING: might not like 0 as file handle
@@ -404,6 +410,9 @@ impl Filesystem for RustyCloud {
                             blksize: 4096,
                             flags: 0
                         };        
+                        let new_d_node: FileNode = new_file_node(&new_directory_attr, &parent.path.clone(), &str_ret).unwrap();
+
+                        node_map.insert(INodeNo(ino_num), new_d_node);
                         reply.entry(&TIMEOUT, &new_directory_attr, Generation(0));
                     }
                     NodeKind::File { .. } => {
@@ -435,13 +444,46 @@ impl Filesystem for RustyCloud {
     println!("calling rmdir");
        }
 
-       fn rename(&self, _req: &Request, parent: INodeNo, name: &OsStr, newparent: INodeNo, 
-       newname: &OsStr, flags: RenameFlags, reply: ReplyEmpty) {
-    //TODO: Implement
-    println!("calling rename");
-       }
-
 */
+    fn rename(&self, _req: &Request, parent: INodeNo, name: &OsStr, newparent: INodeNo, 
+              newname: &OsStr, flags: RenameFlags, reply: ReplyEmpty) {
+        println!("calling rename");
+
+        let mut node_map = self.f_node.lock().unwrap(); 
+        //parent will always be a dir and SHOULD always exist
+        let dir_node = node_map.get_mut(&parent).unwrap();
+        //parent stays same, rename the file
+        if parent == newparent {
+            println!("file moved in same parent dir");
+            match &mut dir_node.file_type {
+                NodeKind::Directory { children } => {
+                    let old_name: String = String::from(name.to_str().unwrap());
+                    let new_name: String = String::from(newname.to_str().unwrap());
+                    match children.get_mut(&old_name) {
+                        Some(_) => {
+                            let ino: u64 = children.remove(&old_name).unwrap(); 
+                            children.insert(new_name, ino);
+                            reply.ok()
+                        } 
+                        None => {
+                            println!("could not find file to rename");
+                            reply.error(Errno::ENOENT)
+                        }
+                    }
+                }
+                NodeKind::File { .. } => {
+                    println!("ERROR rename: should never happen, file in file");
+                    reply.error(Errno::ENOENT)
+
+                }
+            }
+
+                
+        } else {
+            println!("file moved to new dir");
+        }
+    }
+
     fn open(&self, _req: &Request, _ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
         println!("called open");
         println!("flags are {:?}", flags);
