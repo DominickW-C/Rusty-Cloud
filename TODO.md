@@ -1,5 +1,5 @@
 # Things I know I need to work on
 
-- time cause everything is now
+Look into arc 
 
-- cleanup lookup, match in match in match in match
+start refactoring
