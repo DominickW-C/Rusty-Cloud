@@ -35,18 +35,23 @@ use std::path::Path;
 use std::fmt;
 use std::time::SystemTime;
 
-use std::thread;
 use std::sync::Mutex;
 use std::sync::atomic::{
     AtomicU64,
     Ordering
+};
+mod helpers;
+use crate::helpers::{
+    unwrap_parent_dir,
+    new_inode_no,
+    new_file_node
 };
 
 mod datatypes;
 use crate::datatypes::{
     FileNode,
     NodeKind,
-    RustyCloud
+    RustyCloud,
 };
 
 const TIMEOUT: time::Duration = time::Duration::new(2, 0);
@@ -102,143 +107,55 @@ impl fmt::Display for RustyCloud {
         write!(f, "inode: {} \n size: {}\n", inode, size)
     }
 }
-
-
-fn find_parent_node(fs: RustyCloud, parent_ino: INodeNo) -> Option<FileNode> {
-    let node_map = fs.f_node.lock().unwrap();
-    match node_map.get(&parent_ino) {
-        Some(parent) => {
-            match &parent.file_type {
-                NodeKind::Directory { .. } => {
-                },
-                NodeKind::File { .. } => {
-                    println!("parent was a file, this should never happen");
-                    None
-                }
-            }
-        },
-        None => {
-            println!("error in find_parent_node");
-            println!("could not find parent f_node");
-            println!("parent ino {}", parent_ino);
-            None
-        }
-    }
-
-}
-
-fn new_inode_no(fs: &RustyCloud) -> u64 {
-    let ino_num: u64;
-    if fs.free_inode.lock().unwrap().is_empty() {
-        //have to use a new inode number
-        println!("using new inode number");
-        ino_num = *fs.next_inode.lock().unwrap();
-        *fs.next_inode.lock().unwrap() += 1;
-    } else {
-        //have an available inode, use that 
-        println!("using available Inode number");
-        let new_inode_index = fs.free_inode.lock().unwrap().len() - 1;
-        ino_num = fs.free_inode.lock().unwrap()[new_inode_index];
-        fs.free_inode.lock().unwrap().pop();
-    }
-    ino_num
-}
-
-fn new_file_node(new_attr: &FileAttr, parent_path: &String, node_name: &String) -> Option<FileNode> {
-    let mut file_path = parent_path.clone() + &node_name;    
-    let new_f_node: FileNode;
-
-    match new_attr.kind {
-        FileType::Directory => {
-            file_path = file_path.clone() + &"/";
-            new_f_node = FileNode {
-                attr: *new_attr,
-                file_type: NodeKind::Directory { children: HashMap::new() },
-                path: file_path 
-            };
-        } 
-        FileType::RegularFile => {
-            new_f_node = FileNode {
-                attr: *new_attr,
-                file_type: NodeKind::File { file_data: Vec::new() },
-                path: file_path 
-            };
-        } 
-        FileType::NamedPipe | FileType::CharDevice | FileType::BlockDevice | FileType::Symlink | FileType::Socket => {
-            println!("ERROR, BAD THING HAPPENED");
-            println!("NOT IMPLEMENTED FOR NAMED PIPES, CHAR DEVICES, etc");
-            println!("SEE new_file_node");
-            return None
-        }
-
-    }
-    Some(new_f_node)
-}
-
 impl Filesystem for RustyCloud {
     //not in any struct
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         println!("calling lookup for parent: {:?} name {:?}", parent, name);
         //find the parent file
         let mut node_map = self.f_node.lock().unwrap();
-        match node_map.get(&parent) {
-            Some(parent) => {
-                //make sure the parent was a dir a
-                match &parent.file_type {
-                    NodeKind::Directory { children } => {
-                        //convert the OSstr to str
-                        let name_str = match name.to_str() {
-                            Some(string) => string,
-                            None => {
-                                println!("lookup error, coverting name to str");
-                                ""
-                            }
-                        };
-                        //find if child exists
-                        match children.get(name_str) {
-                            Some(inum) => {
-                                let inode = INodeNo(*inum);
-                                let file_node = match node_map.get_mut(&inode) {
-                                    Some(r) => r,
-                                    None => {
-                                        println!("lookup error, finding child attr");
-                                        return reply.error(Errno::ENOENT);
-                                    }
-                                };
-                                println!("DEBUG: lookup filetype: {:?}", file_node.attr.kind);
+        let children = unwrap_parent_dir(&mut node_map, parent);
+        //make sure the parent was a dir a
+        //convert the OSstr to str
+        let name_str = match name.to_str() {
+            Some(string) => string,
+            None => {
+                println!("lookup error, coverting name to str");
+                ""
+            }
+        };
+        //find if child exists
+        match children.get(name_str) {
+            Some(inum) => {
+                let inode = INodeNo(*inum);
+                let file_node = match node_map.get_mut(&inode) {
+                    Some(r) => r,
+                    None => {
+                        println!("lookup error, finding child attr");
+                        return reply.error(Errno::ENOENT);
+                    }
+                };
+                println!("DEBUG: lookup filetype: {:?}", file_node.attr.kind);
 
-                                //if it was a file, we want to update the size
-                                //NOTE: can probably clean up
-                                match &file_node.file_type {
-                                    NodeKind::File { file_data } => {
-                                        file_node.attr.size = file_data.len() as u64;
-                                    }
-                                    NodeKind::Directory { .. } => {}
-                                };
+                //if it was a file, we want to update the size
+                //NOTE: can probably clean up
+                match &file_node.file_type {
+                    NodeKind::File { file_data } => {
+                        file_node.attr.size = file_data.len() as u64;
+                    }
+                    NodeKind::Directory { .. } => {}
+                };
 
-                                reply.entry(&TIMEOUT, &file_node.attr, Generation(0))
-                            },
-                            None => {
-                                println!("no file matching");
-                                reply.error(Errno::ENOENT)
-                            }
-                        }
-                    },
-                    NodeKind::File { .. } => {
-                        println!("lookup found parent as file, should never happen");
-                        reply.error(Errno::ENOENT)
-                    } 
-                }
+                reply.entry(&TIMEOUT, &file_node.attr, Generation(0))
             },
             None => {
-                println!("lookup error, could not find parent inode");
+                println!("no file matching");
                 reply.error(Errno::ENOENT)
             }
         }
 
     }
 
-    fn getattr(&self, _req: &Request, ino: INodeNo, fh: Option<FileHandle>, reply: ReplyAttr) {
+    fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
         println!("calling getattr for inode {:?}", ino);
         let mut node_map = self.f_node.lock().unwrap();
         let node = node_map.get_mut(&ino).unwrap();
@@ -258,256 +175,158 @@ impl Filesystem for RustyCloud {
         }
     }
 
-    fn setattr(&self, _req: &Request, ino: INodeNo, mode: Option<u32>, uid: Option<u32>, gid: Option<u32>, size: Option<u64>,
-               _attime: Option<TimeOrNow>, _mtime: Option<TimeOrNow>, _ctime: Option<SystemTime>, fh: Option<FileHandle>, _crtime: Option<SystemTime>,
-               _chgtime: Option<SystemTime>, _bkuptime: Option<SystemTime>, flags: Option<BsdFileFlags>, reply: ReplyAttr) {
+    fn setattr(&self, _req: &Request, ino: INodeNo, _mode: Option<u32>, _uid: Option<u32>, _gid: Option<u32>, size: Option<u64>,
+        _attime: Option<TimeOrNow>, _mtime: Option<TimeOrNow>, _ctime: Option<SystemTime>, _fh: Option<FileHandle>, 
+        _crtime: Option<SystemTime>, _chgtime: Option<SystemTime>, _bkuptime: Option<SystemTime>, _flags: Option<BsdFileFlags>, reply: ReplyAttr) {
 
         println!("calling setattr");
         println!("size was {:?}", size);
         let mut hash_m = self.f_node.lock().unwrap();
         //NOTE:: could be a pointless match
-        //TODO: add to this
-        match hash_m.get_mut(&ino) {
-            Some(node) => {
-                //size can be none
-                match size {
-                    Some(re) => {
-                        node.attr.size = re;
-                        match &mut node.file_type {
-                            NodeKind::File { file_data } => {
-                                file_data.resize(re as usize, 0);                  
-                                reply.attr(&TIMEOUT, &node.attr)
-                            }
-                            NodeKind::Directory { .. } => reply.attr(&TIMEOUT, &node.attr)
-                        }
+        let node = hash_m.get_mut(&ino).unwrap();
+        //size can be none
+        match size {
+            Some(re) => {
+                node.attr.size = re;
+                match &mut node.file_type {
+                    NodeKind::File { file_data } => {
+                        file_data.resize(re as usize, 0);                  
+                        reply.attr(&TIMEOUT, &node.attr)
                     }
-                    None => reply.attr(&TIMEOUT, &node.attr)
+                    NodeKind::Directory { .. } => reply.attr(&TIMEOUT, &node.attr)
                 }
             }
-            None => {
-                println!("setattr error, to inode found matching");
-                reply.error(Errno::ENOENT);
-            }
+            None => reply.attr(&TIMEOUT, &node.attr)
         }
-        //TODO: truncate will be called to this, and it needs to set a file size to 0
     }
 
-    fn create(&self, _req: &Request, parent: INodeNo, name: &OsStr, mode: u32, umask: u32, flags: i32, reply: ReplyCreate) {
+    fn create(&self, _req: &Request, parent: INodeNo, name: &OsStr, _mode: u32, _umask: u32, _flags: i32, reply: ReplyCreate) {
+        println!("calling create");
         println!("parent INode {}", parent);
         println!("name of file is {:?}", name);
-        println!("mode is {}", mode);
-        println!("umask is {}", umask);
-        println!("flags is {}", flags);
-        //go to the parent node, create a child for it
-        //WARNING: DID THIS CREATE A LOCAL
-        let mut hash_m = self.f_node.lock().unwrap();
-        match hash_m.get_mut(&parent) {
-            Some (p_result) => {
-                match &mut p_result.file_type {
-                    NodeKind::Directory { children } => {
-                        //TODO: clean up var names
-                        let str_name =  name.to_str().unwrap();
-                        let str_ret = String::from(str_name);
-                        let ino_num: u64 = new_inode_no(self);
-                        children.insert(str_ret.clone(), ino_num);
-                                        
-                        let new_file_attr: fuser::FileAttr = FileAttr {
-                            ino: INodeNo(ino_num),
-                            size: 0,
-                            blocks: 0,
-                            atime: UNIX_EPOCH,
-                            mtime: UNIX_EPOCH,
-                            ctime: UNIX_EPOCH,
-                            crtime:UNIX_EPOCH,
-                            kind: FileType::RegularFile,
-                            perm: 755,
-                            nlink: 0,
-                            uid: 0,
-                            gid: 0,
-                            rdev: 0,
-                            blksize: 4096,
-                            flags: 0
-                        };
-                        let new_f_node: FileNode = new_file_node(&new_file_attr, &p_result.path.clone(), &str_ret).unwrap();
-                        hash_m.insert(INodeNo(ino_num), new_f_node);
-                        
+        let mut node_map = self.f_node.lock().unwrap();
+        let children = unwrap_parent_dir(&mut node_map, parent);
+        //TODO: clean up var names
+        let str_name =  name.to_str().unwrap();
+        let str_ret = String::from(str_name);
+        let ino_num: u64 = new_inode_no(self);
+        children.insert(str_ret.clone(), ino_num);
 
-                        //WARNING: might not like 0 as file handle
-                        reply.created(&TIMEOUT, &new_file_attr, Generation(0), FileHandle(0), FopenFlags::empty())
-                    } 
-                    NodeKind::File { .. } => {
-                        println!("parent was a file, should never happen");
-                        reply.error(Errno::ENOENT);
-                    }
-                }    
-            }
-            None => {
-                println!("parent node not found");
-                reply.error(Errno::ENOENT);
-            }
-        }
+        let new_file_attr: fuser::FileAttr = FileAttr {
+            ino: INodeNo(ino_num),
+            size: 0,
+            blocks: 0,
+            atime: UNIX_EPOCH,
+            mtime: UNIX_EPOCH,
+            ctime: UNIX_EPOCH,
+            crtime:UNIX_EPOCH,
+            kind: FileType::RegularFile,
+            perm: 755,
+            nlink: 0,
+            uid: 0,
+            gid: 0,
+            rdev: 0,
+            blksize: 4096,
+            flags: 0
+        };
+        //WARNING: might be inefficient but code is a lot better
+        let p_result = node_map.get(&parent).unwrap();
+        let new_f_node: FileNode = new_file_node(&new_file_attr, &p_result.path.clone(), &str_ret).unwrap();
+        node_map.insert(INodeNo(ino_num), new_f_node);
 
-        //create a new node for the file, updates its path
+
+        //WARNING: might not like 0 as file handle
+        reply.created(&TIMEOUT, &new_file_attr, Generation(0), FileHandle(0), FopenFlags::empty())
 
     }
 
-    fn mkdir(&self, _req: &Request, parent: INodeNo, name: &OsStr, mode: u32, umask: u32, reply: ReplyEntry) {
+    fn mkdir(&self, _req: &Request, parent: INodeNo, name: &OsStr, _mode: u32, _umask: u32, reply: ReplyEntry) {
         println!("calling mkdir");
 
         let mut node_map = self.f_node.lock().unwrap();
-        match node_map.get_mut(&parent) {
-            Some(parent) => {
-                match &mut parent.file_type {
-                    NodeKind::Directory { children } => {
-                        let str_name =  name.to_str().unwrap();
-                        let str_ret = String::from(str_name);
-                        let ino_num: u64 = new_inode_no(self); 
-                        children.insert(str_ret.clone(), ino_num);
+        let children = unwrap_parent_dir(&mut node_map, parent);
+        //TODO: better var names
+        let str_name =  name.to_str().unwrap();
+        let str_ret = String::from(str_name);
+        let ino_num: u64 = new_inode_no(self); 
+        children.insert(str_ret.clone(), ino_num);
 
-                        let new_directory_attr: fuser::FileAttr = FileAttr {
-                            ino: INodeNo(ino_num),
-                            size: 0,
-                            blocks: 0,
-                            atime: UNIX_EPOCH,
-                            mtime: UNIX_EPOCH,
-                            ctime: UNIX_EPOCH,
-                            crtime:UNIX_EPOCH,
-                            kind: FileType::Directory,
-                            perm: 755,
-                            nlink: 0,
-                            uid: 0,
-                            gid: 0,
-                            rdev: 0,
-                            blksize: 4096,
-                            flags: 0
-                        };        
-                        let new_d_node: FileNode = new_file_node(&new_directory_attr, &parent.path.clone(), &str_ret).unwrap();
+        let new_directory_attr: fuser::FileAttr = FileAttr {
+            ino: INodeNo(ino_num),
+            size: 0,
+            blocks: 0,
+            atime: UNIX_EPOCH,
+            mtime: UNIX_EPOCH,
+            ctime: UNIX_EPOCH,
+            crtime:UNIX_EPOCH,
+            kind: FileType::Directory,
+            perm: 755,
+            nlink: 0,
+            uid: 0,
+            gid: 0,
+            rdev: 0,
+            blksize: 4096,
+            flags: 0
+        };        
+        //WARNING: might be inefficient but code is a lot better
+        let p_result = node_map.get(&parent).unwrap();
+        let new_d_node: FileNode = new_file_node(&new_directory_attr, &p_result.path.clone(), &str_ret).unwrap();
 
-                        node_map.insert(INodeNo(ino_num), new_d_node);
-                        reply.entry(&TIMEOUT, &new_directory_attr, Generation(0));
-                    }
-                    NodeKind::File { .. } => {
-                        println!("parent was a file, not possible");
-                        reply.error(Errno::ENOENT);
-                    }
-                }
+        node_map.insert(INodeNo(ino_num), new_d_node);
+        reply.entry(&TIMEOUT, &new_directory_attr, Generation(0));
 
-            }
-            None => {
-                println!("could not find the parent node, should never happen");
-                reply.error(Errno::ENOENT);
-            }
-        }
     }
 
     fn rmdir(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
         println!("calling rmdir");
 
         let mut node_map = self.f_node.lock().unwrap();
-        //TODO:: test a nonexistent file for unwrap 
-        let p_node = node_map.get_mut(&parent).unwrap();
+        let children = unwrap_parent_dir(&mut node_map, parent);
 
-        match &mut p_node.file_type {
-
-            NodeKind::Directory { children } => {
-                let name_string = String::from(name.to_str().unwrap());
-                let ino_num = children.remove(&name_string).unwrap();
-                node_map.remove(&INodeNo(ino_num));
-                self.free_inode.lock().unwrap().push(ino_num);
-                reply.ok();
-
-            }
-            NodeKind::File { .. } => {
-                println!("unlink: not possible");
-                reply.error(Errno::ENOENT)
-            }
-        }
+        let name_string = String::from(name.to_str().unwrap());
+        let ino_num = children.remove(&name_string).unwrap();
+        node_map.remove(&INodeNo(ino_num));
+        self.free_inode.lock().unwrap().push(ino_num);
+        reply.ok();
     }
 
     fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
         println!("calling unlink");
 
         let mut node_map = self.f_node.lock().unwrap();
-
-        //TODO:: test a nonexistent file for unwrap 
-        let p_node = node_map.get_mut(&parent).unwrap();
-
-        match &mut p_node.file_type {
-
-            NodeKind::Directory { children } => {
-                let name_string = String::from(name.to_str().unwrap());
-                let ino_num = children.remove(&name_string).unwrap();
-                node_map.remove(&INodeNo(ino_num));
-                self.free_inode.lock().unwrap().push(ino_num);
-                reply.ok();
-
-            }
-            NodeKind::File { .. } => {
-                println!("unlink: not possible");
-                reply.error(Errno::ENOENT)
-            }
-        }
-
-
-        //go to parent, remove the name of its child and save the inode
-        //save the inode in free_inode
-        //go to f_nodes, remove the file from there
+        let children = unwrap_parent_dir(&mut node_map, parent);
+        let name_string = String::from(name.to_str().unwrap());
+        let ino_num = children.remove(&name_string).unwrap();
+        node_map.remove(&INodeNo(ino_num));
+        self.free_inode.lock().unwrap().push(ino_num);
+        reply.ok();
     }
 
     fn rename(&self, _req: &Request, parent: INodeNo, name: &OsStr, newparent: INodeNo, 
-        newname: &OsStr, flags: RenameFlags, reply: ReplyEmpty) {
+        newname: &OsStr, _flags: RenameFlags, reply: ReplyEmpty) {
         println!("calling rename");
 
         let mut node_map = self.f_node.lock().unwrap(); 
-        //parent will always be a dir and SHOULD always exist
-        let dir_node = node_map.get_mut(&parent).unwrap();
-        //parent stays same, rename the file
-        match &mut dir_node.file_type {
-            NodeKind::Directory { children } => {
-                let old_name: String = String::from(name.to_str().unwrap());
-                let new_name: String = String::from(newname.to_str().unwrap());
-                match children.get_mut(&old_name) {
-                    Some(_) => {
-                        println!("file moved in same parent dir");
-                        let ino: u64 = children.remove(&old_name).unwrap(); 
-                        if parent == newparent {
-                            children.insert(new_name, ino);
-                            reply.ok()
-                        } else {
-                            println!("file moved to new dir");
-                            //add inode to new parent, don't have to adjust f_node since it tracks
-                            //the inode to a file attr and the inode never changed
-                            let new_parent_node = match node_map.get_mut(&newparent) {
-                                Some(r) => r,
-                                None => {
-                                    println!("rename: new parent was not found");
-                                    return reply.error(Errno::ENOENT);
-                                }
-                            };
-
-                            match &mut new_parent_node.file_type {
-                                NodeKind::Directory { children } => {
-                                    children.insert(new_name, ino);
-                                    reply.ok();
-                                }
-                                NodeKind::File { .. } => {
-                                    println!("rename: tried moving to a file");
-                                    reply.error(Errno::ENOENT);
-
-                                }
-                            }
-                        }
-                    } 
-                    None => {
-                        println!("could not find file to rename");
-                        reply.error(Errno::ENOENT)
-                    }
+        let children = unwrap_parent_dir(&mut node_map, parent);
+        let old_name: String = String::from(name.to_str().unwrap());
+        let new_name: String = String::from(newname.to_str().unwrap());
+        match children.get_mut(&old_name) {
+            Some(_) => {
+                println!("file moved in same parent dir");
+                let ino: u64 = children.remove(&old_name).unwrap(); 
+                if parent == newparent {
+                    children.insert(new_name, ino);
+                    reply.ok()
+                } else {
+                    println!("file moved to new dir");
+                    let new_children = unwrap_parent_dir(&mut node_map, newparent);
+                    new_children.insert(new_name, ino);
+                    reply.ok();
                 }
-            }
-            NodeKind::File { .. } => {
-                println!("ERROR rename: should never happen, file in file");
+            } 
+            None => {
+                println!("could not find file to rename");
                 reply.error(Errno::ENOENT)
-
             }
         }
 
@@ -522,8 +341,8 @@ impl Filesystem for RustyCloud {
         reply.opened(FileHandle(fh), FopenFlags::empty());
     }
 
-    fn read(&self, _req: &Request, ino: INodeNo, fh: FileHandle, offset: u64, size: u32, 
-        flags: OpenFlags, lock_owner: Option<LockOwner>, reply: ReplyData) {
+    fn read(&self, _req: &Request, ino: INodeNo, _fh: FileHandle, _offset: u64, _size: u32, 
+        _flags: OpenFlags, _lock_owner: Option<LockOwner>, reply: ReplyData) {
         //TODO: Implement
         //NOTE: trying to read a file with size 0 does absolutely nothing
         println!("read called from from ino: {:?}", ino);
@@ -544,7 +363,7 @@ impl Filesystem for RustyCloud {
         }; 
     }
 
-    fn readdir(&self, _req: &Request, ino: INodeNo, fh: FileHandle, offset: u64, mut reply: ReplyDirectory) {
+    fn readdir(&self, _req: &Request, ino: INodeNo, _fh: FileHandle, offset: u64, mut reply: ReplyDirectory) {
         //TODO: Break out of loop if add is full? and then call this function again
         println!("calling readdir on inode {}", ino);
         println!("what is the offset? {}", offset);
@@ -552,41 +371,31 @@ impl Filesystem for RustyCloud {
         //first get the parent 
 
         //hashmap of f_nodes
-        let node_map = &self.f_node.lock().unwrap();
-        //parent node
-        let parent_node = node_map.get(&ino).unwrap();
-
-        match &parent_node.file_type {
-            NodeKind::Directory { children } => {
-                let child_files = children.clone();
-                //string (name), u64 (inode)
-                for (i, (name, ino)) in child_files.iter().enumerate().skip(offset as usize) {
-                    println!("in loop, name: {}", name);
-                    println!("in loop, ino: {}", ino);
-                    //now get the type of file it is 
-                    let file_node = node_map.get(&INodeNo(*ino)).unwrap();
-                    let ft = match file_node.file_type {
-                        NodeKind::Directory { .. } => FileType::Directory, 
-                        NodeKind::File { .. } => FileType::RegularFile 
-                    };
-                    let buffer_full = reply.add(INodeNo(*ino), (i + 1) as u64, ft, name);
-                    if buffer_full {
-                        break;
-                    }
-
-
-                }
-                reply.ok();
+        let mut node_map = self.f_node.lock().unwrap();
+        let children = unwrap_parent_dir(&mut node_map, ino);
+        let child_files = children.clone();
+        //string (name), u64 (inode)
+        for (i, (name, ino)) in child_files.iter().enumerate().skip(offset as usize) {
+            println!("in loop, name: {}", name);
+            println!("in loop, ino: {}", ino);
+            //now get the type of file it is 
+            let file_node = node_map.get(&INodeNo(*ino)).unwrap();
+            let ft = match file_node.file_type {
+                NodeKind::Directory { .. } => FileType::Directory, 
+                NodeKind::File { .. } => FileType::RegularFile 
+            };
+            let buffer_full = reply.add(INodeNo(*ino), (i + 1) as u64, ft, name);
+            if buffer_full {
+                break;
             }
-            NodeKind::File { .. } => {
-                println!("not possible");
-                reply.error(Errno::ENOENT);
-            }
+
+
         }
+        reply.ok();
     }
 
-    fn write(&self, _req: &Request, ino: INodeNo, fh:FileHandle, offset: u64, data: &[u8], 
-        write_flags: WriteFlags, flags: OpenFlags, lock_owner: Option<LockOwner>, reply: ReplyWrite) {
+    fn write(&self, _req: &Request, ino: INodeNo, _fh:FileHandle, _offset: u64, data: &[u8], 
+        write_flags: WriteFlags, _flags: OpenFlags, _lock_owner: Option<LockOwner>, reply: ReplyWrite) {
 
         println!("calling write");
         println!("write flags are: {:?}", write_flags);

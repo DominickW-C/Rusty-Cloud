@@ -2,7 +2,6 @@ use fuser::{
     FileAttr
 };
 
-
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
