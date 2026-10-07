@@ -10,7 +10,9 @@ pub enum NodeKind {
     //file data
     File { file_data: Vec<u8> },
     //if it was directory, name and inodeno
-    Directory { children: HashMap<String, u64> }
+    Directory { children: HashMap<String, u64> },
+    //symlink
+    Symlink { point: u64 }
 }
 
 pub struct FileNode {

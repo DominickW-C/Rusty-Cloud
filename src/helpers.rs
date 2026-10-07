@@ -15,7 +15,8 @@ pub fn unwrap_parent_dir(node_map: &mut HashMap<fuser::INodeNo, FileNode>, paren
         Some(parent_node) => {
             match &mut parent_node.file_type {
                 NodeKind::Directory { children } => children,
-                NodeKind::File { .. } => panic!("Parent node was a file")
+                NodeKind::File { .. } => panic!("Parent node was a file"),
+                NodeKind::Symlink { .. } => panic!("Parent node was a symlink")
 
             }
         }
