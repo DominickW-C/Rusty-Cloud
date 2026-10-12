@@ -12,7 +12,7 @@ pub enum NodeKind {
     //if it was directory, name and inodeno
     Directory { children: HashMap<String, u64> },
     //symlink
-    Symlink { point: u64 }
+    Symlink { target_ino: String }
 }
 
 pub struct FileNode {
@@ -25,5 +25,6 @@ pub struct RustyCloud {
     pub f_node: Mutex<HashMap<fuser::INodeNo, FileNode>>,
     pub next_inode: Mutex<u64>,
     pub free_inode: Mutex<Vec<u64>>,
-    pub next_fh: AtomicU64 
+    pub next_fh: AtomicU64,
+    pub sym_target_half: Mutex<String>
 }

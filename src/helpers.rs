@@ -42,7 +42,7 @@ pub fn new_inode_no(fs: &RustyCloud) -> u64 {
 }
 
 pub fn new_file_node(new_attr: &FileAttr, parent_path: &str, node_name: &str) -> Option<FileNode> {
-    let mut file_path = parent_path.to_owned()+ node_name;    
+    let mut file_path = parent_path.to_owned() + node_name;    
     let new_f_node: FileNode;
 
     match new_attr.kind {
@@ -61,7 +61,10 @@ pub fn new_file_node(new_attr: &FileAttr, parent_path: &str, node_name: &str) ->
                 path: file_path 
             };
         } 
-        FileType::NamedPipe | FileType::CharDevice | FileType::BlockDevice | FileType::Symlink | FileType::Socket => {
+        FileType::Symlink => {
+            panic!("symlinks are dealt with in function");
+        }
+        FileType::NamedPipe | FileType::CharDevice | FileType::BlockDevice | FileType::Socket => {
             println!("ERROR, BAD THING HAPPENED");
             println!("NOT IMPLEMENTED FOR NAMED PIPES, CHAR DEVICES, etc");
             println!("SEE new_file_node");
@@ -72,4 +75,25 @@ pub fn new_file_node(new_attr: &FileAttr, parent_path: &str, node_name: &str) ->
     Some(new_f_node)
 }
 
+/*
+ * works great but no use yet
+pub fn find_inode_from_path(node_map: &mut HashMap<fuser::INodeNo, FileNode>, target_path: &str) -> u64{
+    let split_path: Vec<&str> = target_path.split('/').collect(); 
+    let mut last_parent_ino: u64 = 1;
+    for cur_node in split_path.iter() {
+        //first is always empty since we start at root
+        if cur_node.is_empty() {
+            continue;
+        }
+        //we will always be in a valid parent
+        let p_node = node_map.get(&INodeNo(last_parent_ino)).unwrap();
+
+        if let NodeKind::Directory { children } = &p_node.file_type {
+            last_parent_ino = *children.get(*cur_node).unwrap();
+        }
+    }
+
+    last_parent_ino
+}
+*/
 

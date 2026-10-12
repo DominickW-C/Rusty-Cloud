@@ -44,7 +44,7 @@ mod helpers;
 use crate::helpers::{
     unwrap_parent_dir,
     new_inode_no,
-    new_file_node
+    new_file_node,
 };
 
 mod datatypes;
@@ -61,6 +61,7 @@ impl RustyCloud {
         let next_inode =  Mutex::new(2);
         let free_inode = Mutex::new(Vec::new());
         let f_node = Mutex::new(HashMap::new());
+        let sym_target_half = Mutex::new(String::new());
         //start at 3 to avoid any in,out,err confusion
         let next_fh = AtomicU64::new(3);
         let root_attr = FileAttr {
@@ -70,9 +71,7 @@ impl RustyCloud {
             atime: UNIX_EPOCH,
             mtime: UNIX_EPOCH,
             ctime: UNIX_EPOCH,
-            crtime:UNIX_EPOCH,
-            kind: FileType::Directory,
-            perm: 755,
+            crtime:UNIX_EPOCH, kind: FileType::Directory, perm: 755,
             nlink: 2,
             uid: 0,
             gid: 0,
@@ -86,7 +85,7 @@ impl RustyCloud {
             path: String::from("/") 
         });
 
-        Self { f_node, next_fh, next_inode, free_inode }
+        Self { f_node, next_fh, next_inode, free_inode, sym_target_half }
     }
 }
 
@@ -131,7 +130,9 @@ impl Filesystem for RustyCloud {
                     }
                     NodeKind::Directory { .. } => {},
                     //TODO: filesize might be wrong for symlinksj
-                    NodeKind::Symlink { .. } => {}
+                    NodeKind::Symlink { .. } => {
+                        println!("LOOKUP FOUND A SYMLINK");
+                    }
 
                 };
                 println!("LINK DEBUG: ino was {:?}", inode.0);
@@ -160,6 +161,8 @@ impl Filesystem for RustyCloud {
             NodeKind::Directory { .. } => {
                 println!("getattr thinks is dir");
                 println!("DEBUG: getattr filetype: {:?}", node.attr.kind);
+                *self.sym_target_half.lock().unwrap() = node.path.clone();
+
                 reply.attr(&TIMEOUT, &node.attr)
             }
             NodeKind::Symlink { .. } => {
@@ -463,22 +466,54 @@ impl Filesystem for RustyCloud {
     }
 
     fn symlink (&self, _req: &Request, parent: INodeNo, link_name: &OsStr, target: &Path, reply: ReplyEntry) {
-        //BEHAVIOR
-        //you can echo data to a symlink, which means I need to handle that in write
-        //this would be in write seeing if it was a symlink, and then going to the actual file
-        //deleting the parent file will break the link and not delete it
-        //
-        //link name is the new link
-        //target is the full path to the file it links to
-        //parent is the parent of where the inode will live
         let mut node_map = self.f_node.lock().unwrap();
         println!("parent is {:?}", parent);
 
-        let sym_ino = 
+        let sym_ino: u64 = new_inode_no(self);
         let children = unwrap_parent_dir(&mut node_map, parent);
-        children.insert(link_name, )
+        let sym_str: &str = link_name.to_str().unwrap();
+        children.insert(String::from(sym_str), sym_ino);
 
+        //now the sym link exists in parent, add to node_map 
+        let sym_attr = FileAttr {
+            ino: INodeNo(sym_ino),
+            size: 0,
+            blocks: 0,
+            atime: UNIX_EPOCH,
+            mtime: UNIX_EPOCH,
+            ctime: UNIX_EPOCH,
+            crtime:UNIX_EPOCH,
+            kind: FileType::Symlink,
+            perm: 755,
+            nlink: 2,
+            uid: 0,
+            gid: 0,
+            rdev: 0,
+            blksize: 4096,
+            flags: 0
+        };
+        let p_node = node_map.get(&parent).unwrap();
+        let sym_node = FileNode {
+            attr: sym_attr,
+            file_type: NodeKind::Symlink { target_ino: String::from(target.to_str().unwrap()) }, 
+            path: p_node.path.clone() + sym_str
+        };
+        node_map.insert(INodeNo(sym_ino), sym_node);
+        reply.entry(&TIMEOUT, &sym_attr, Generation(0));
+    }
+    
+    fn readlink(&self, _req: &Request, ino: INodeNo, reply: ReplyData) {
+        println!("calling readlink");
+        let node_map = self.f_node.lock().unwrap();
+        let link_node = &node_map.get(&ino).unwrap().file_type; 
 
+        if let NodeKind::Symlink { target_ino } = link_node {
+            println!("readlink is replying with {:?}", target_ino);
+            reply.data(target_ino.as_bytes());
+        } else {
+            println!("tried reading non symlink as symlink");
+            reply.error(Errno::ENOENT)
+        }
     }
 }
 
