@@ -26,5 +26,4 @@ pub struct RustyCloud {
     pub next_inode: Mutex<u64>,
     pub free_inode: Mutex<Vec<u64>>,
     pub next_fh: AtomicU64,
-    pub sym_target_half: Mutex<String>
 }

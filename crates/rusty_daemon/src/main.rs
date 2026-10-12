@@ -61,7 +61,6 @@ impl RustyCloud {
         let next_inode =  Mutex::new(2);
         let free_inode = Mutex::new(Vec::new());
         let f_node = Mutex::new(HashMap::new());
-        let sym_target_half = Mutex::new(String::new());
         //start at 3 to avoid any in,out,err confusion
         let next_fh = AtomicU64::new(3);
         let root_attr = FileAttr {
@@ -85,7 +84,7 @@ impl RustyCloud {
             path: String::from("/") 
         });
 
-        Self { f_node, next_fh, next_inode, free_inode, sym_target_half }
+        Self { f_node, next_fh, next_inode, free_inode }
     }
 }
 
@@ -161,7 +160,6 @@ impl Filesystem for RustyCloud {
             NodeKind::Directory { .. } => {
                 println!("getattr thinks is dir");
                 println!("DEBUG: getattr filetype: {:?}", node.attr.kind);
-                *self.sym_target_half.lock().unwrap() = node.path.clone();
 
                 reply.attr(&TIMEOUT, &node.attr)
             }
