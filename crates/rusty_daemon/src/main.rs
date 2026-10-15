@@ -40,6 +40,12 @@ use std::sync::atomic::{
     AtomicU64,
     Ordering
 };
+
+mod merging;
+use crate::merging:: {
+    split_by_changes
+};
+
 mod helpers;
 use crate::helpers::{
     unwrap_parent_dir,
@@ -70,7 +76,7 @@ impl RustyCloud {
             atime: UNIX_EPOCH,
             mtime: UNIX_EPOCH,
             ctime: UNIX_EPOCH,
-            crtime:UNIX_EPOCH, kind: FileType::Directory, perm: 755,
+            crtime: UNIX_EPOCH, kind: FileType::Directory, perm: 755,
             nlink: 2,
             uid: 0,
             gid: 0,
@@ -81,7 +87,8 @@ impl RustyCloud {
         f_node.lock().unwrap().insert(fuser::INodeNo(1), FileNode {
             attr: root_attr,
             file_type: NodeKind::Directory { children: HashMap::new() },
-            path: String::from("/") 
+            path: String::from("/"),
+            current_opens: 0
         });
 
         Self { f_node, next_fh, next_inode, free_inode }
@@ -101,7 +108,6 @@ impl fmt::Display for RustyCloud {
         let inode = root_file_node.attr.ino;
         let size = root_file_node.attr.size;
         
-
         write!(f, "inode: {} \n size: {}\n", inode, size)
     }
 }
@@ -338,9 +344,13 @@ impl Filesystem for RustyCloud {
 
     }
 
-    fn open(&self, _req: &Request, _ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+    fn open(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
         println!("called open");
         println!("flags are {:?}", flags);
+
+        let mut node_map = self.f_node.lock().unwrap();
+        let file_node = node_map.get_mut(&ino).unwrap();
+        file_node.current_opens += 1;
 
         let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
         reply.opened(FileHandle(fh), FopenFlags::empty());
@@ -422,6 +432,7 @@ impl Filesystem for RustyCloud {
                             file_data.push(*ch);
                         }
                         reply.written(data.len() as u32);
+                        node.current_opens -= 1;
                     }
                     NodeKind::Directory { .. } => {
                         println!("WRITE: can't write to a dir");
@@ -494,7 +505,9 @@ impl Filesystem for RustyCloud {
         let sym_node = FileNode {
             attr: sym_attr,
             file_type: NodeKind::Symlink { target_ino: String::from(target.to_str().unwrap()) }, 
-            path: p_node.path.clone() + sym_str
+            path: p_node.path.clone() + sym_str,
+            current_opens: 0
+ 
         };
         node_map.insert(INodeNo(sym_ino), sym_node);
         reply.entry(&TIMEOUT, &sym_attr, Generation(0));

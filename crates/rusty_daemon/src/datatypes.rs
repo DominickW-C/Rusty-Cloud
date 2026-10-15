@@ -18,7 +18,9 @@ pub enum NodeKind {
 pub struct FileNode {
     pub attr: FileAttr,
     pub file_type: NodeKind,
-    pub path: String
+    pub path: String,
+    //pub hash: String,
+    pub current_opens: u8
 }
 
 pub struct RustyCloud {
@@ -26,4 +28,16 @@ pub struct RustyCloud {
     pub next_inode: Mutex<u64>,
     pub free_inode: Mutex<Vec<u64>>,
     pub next_fh: AtomicU64,
+}
+
+pub enum GroupType {
+    Same,
+    New,
+    Deleted
+}
+
+pub struct FileGrouped {
+    pub data_group: Vec<Vec<u8>>,
+    //will be a vector where the index matches the group in data
+    pub group_type: Vec<GroupType>,
 }

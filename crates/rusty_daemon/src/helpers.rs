@@ -51,14 +51,16 @@ pub fn new_file_node(new_attr: &FileAttr, parent_path: &str, node_name: &str) ->
             new_f_node = FileNode {
                 attr: *new_attr,
                 file_type: NodeKind::Directory { children: HashMap::new() },
-                path: file_path 
+                path: file_path,
+                current_opens: 0
             };
         } 
         FileType::RegularFile => {
             new_f_node = FileNode {
                 attr: *new_attr,
                 file_type: NodeKind::File { file_data: Vec::new() },
-                path: file_path 
+                path: file_path, 
+                current_opens: 0
             };
         } 
         FileType::Symlink => {
