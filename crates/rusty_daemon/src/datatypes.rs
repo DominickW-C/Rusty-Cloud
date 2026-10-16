@@ -1,5 +1,6 @@
 use fuser::{
-    FileAttr
+    FileAttr,
+    FileHandle
 };
 
 use std::collections::HashMap;
@@ -20,7 +21,7 @@ pub struct FileNode {
     pub file_type: NodeKind,
     pub path: String,
     //pub hash: String,
-    pub current_opens: u8
+    pub current_opens: Vec<FileHandle> 
 }
 
 pub struct RustyCloud {
@@ -30,6 +31,7 @@ pub struct RustyCloud {
     pub next_fh: AtomicU64,
 }
 
+#[derive(PartialEq)]
 pub enum GroupType {
     Same,
     New,
@@ -40,4 +42,6 @@ pub struct FileGrouped {
     pub data_group: Vec<Vec<u8>>,
     //will be a vector where the index matches the group in data
     pub group_type: Vec<GroupType>,
+    //tracks the lines at which a group break happened, going off the new file
+    pub group_breaks: Vec<usize>
 }

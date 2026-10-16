@@ -2,6 +2,7 @@ use fuser::{
     INodeNo,
     FileAttr,
     FileType,
+    FileHandle
 };
 
 use crate::HashMap;
@@ -44,6 +45,8 @@ pub fn new_inode_no(fs: &RustyCloud) -> u64 {
 pub fn new_file_node(new_attr: &FileAttr, parent_path: &str, node_name: &str) -> Option<FileNode> {
     let mut file_path = parent_path.to_owned() + node_name;    
     let new_f_node: FileNode;
+    let open: Vec<FileHandle> = Vec::new();
+
 
     match new_attr.kind {
         FileType::Directory => {
@@ -52,7 +55,8 @@ pub fn new_file_node(new_attr: &FileAttr, parent_path: &str, node_name: &str) ->
                 attr: *new_attr,
                 file_type: NodeKind::Directory { children: HashMap::new() },
                 path: file_path,
-                current_opens: 0
+                //WARNING: could be wrong
+                current_opens: open
             };
         } 
         FileType::RegularFile => {
@@ -60,7 +64,7 @@ pub fn new_file_node(new_attr: &FileAttr, parent_path: &str, node_name: &str) ->
                 attr: *new_attr,
                 file_type: NodeKind::File { file_data: Vec::new() },
                 path: file_path, 
-                current_opens: 0
+                current_opens: open
             };
         } 
         FileType::Symlink => {

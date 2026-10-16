@@ -26,23 +26,75 @@ pub fn split_by_changes(old_file_data: Vec<u8>, new_file_data: Vec<u8>) -> FileG
     let new_by_line: Vec<Vec<u8>> = find_file_lines(&new_file_data); 
     let mut old_iter = 0;
     let mut new_iter = 0;
-    //data group we are currently on
-    let mut current_group = 0;
 
-    //remove first iter since done here
     //TODO: ACCOUNT DELETES
     let mut text_group = FileGrouped {
         data_group: Vec::new(),
-        group_type: Vec::new()
+        group_type: Vec::new(),
+        group_breaks: Vec::new()
     };
 
-    let mut new_group: bool = true;
-    let new_group: Vec<u8> = Vec::new();
+    let mut first_line_flag: bool = true;
+    let mut new_group: Vec<u8> = Vec::new();
     while old_iter < old_by_line.len() && new_iter < new_by_line.len() {
         //new_group flag will set the group, and when it is not set, we check the index of current
         //group to see what our current one is
 
+        //encountered a same line
         if old_by_line[old_iter] == new_by_line[new_iter] {
+            if first_line_flag {
+                new_group.extend_from_slice(&new_by_line[new_iter]);
+                text_group.group_type.push(GroupType::Same);
+                old_iter += 1;
+                new_iter += 1;
+                first_line_flag = false;
+            }
+            //currently at a new group of old stuff, start filling a group, and push the type of
+            //group to the text_group
+            //check if the last group was same 
+            let group_type_size = text_group.group_type.len();
+            if text_group.group_type[group_type_size - 1] == GroupType::Same {
+                //it was the same, push to new block and continue
+                new_group.extend_from_slice(&new_by_line[new_iter]);
+                old_iter += 1;
+                new_iter += 1;
+            } else {
+                //it was different push our block and start a new one
+                text_group.data_group.push(new_group.clone());
+                text_group.group_type.push(GroupType::Same);
+                new_group.clear();
+                new_group.extend_from_slice(&new_by_line[new_iter]);
+                old_iter += 1;
+                new_iter += 1;
+                //+1 accounts for indexing
+                text_group.group_breaks.push(new_iter + 1);
+            }
+        }
+
+        //either something was added or deleted
+        if old_by_line[old_iter] != new_by_line[new_iter] {
+            if first_line_flag {
+                new_group.extend_from_slice(&new_by_line[new_iter]);
+                text_group.group_type.push(GroupType::New);
+                new_iter += 1;
+                first_line_flag = false;
+            }
+            //something was added (only thing now)
+            let group_type_size = text_group.group_type.len();
+            if text_group.group_type[group_type_size - 1] == GroupType::New {
+                //already was in a new group
+                new_group.extend_from_slice(&new_by_line[new_iter]);
+                new_iter += 1;
+            } else {
+                //starting a new group of new
+                text_group.data_group.push(new_group.clone());
+                text_group.group_type.push(GroupType::New);
+                new_group.clear();
+                new_group.extend_from_slice(&new_by_line[new_iter]);
+                new_iter += 1;
+                text_group.group_breaks.push(new_iter + 1);
+            }
+
         }
     }
 

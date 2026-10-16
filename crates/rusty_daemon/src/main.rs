@@ -88,7 +88,7 @@ impl RustyCloud {
             attr: root_attr,
             file_type: NodeKind::Directory { children: HashMap::new() },
             path: String::from("/"),
-            current_opens: 0
+            current_opens: Vec::new()
         });
 
         Self { f_node, next_fh, next_inode, free_inode }
@@ -126,7 +126,6 @@ impl Filesystem for RustyCloud {
             Some(inum) => {
                 let inode = INodeNo(*inum);
                 let file_node = node_map.get_mut(&inode).unwrap();
-                println!("DEBUG: lookup filetype: {:?}", file_node.attr.kind);
                 //if it was a file, we want to update the size
                 //NOTE: can probably clean up
                 match &file_node.file_type {
@@ -136,11 +135,9 @@ impl Filesystem for RustyCloud {
                     NodeKind::Directory { .. } => {},
                     //TODO: filesize might be wrong for symlinksj
                     NodeKind::Symlink { .. } => {
-                        println!("LOOKUP FOUND A SYMLINK");
                     }
 
                 };
-                println!("LINK DEBUG: ino was {:?}", inode.0);
                 reply.entry(&TIMEOUT, &file_node.attr, Generation(0))
             },
             None => {
@@ -157,16 +154,10 @@ impl Filesystem for RustyCloud {
         let node = node_map.get_mut(&ino).unwrap();
         match &mut node.file_type {
             NodeKind::File { file_data } => {
-                println!("getattr thinks is file");
                 node.attr.size = file_data.len() as u64;
-                println!("the length of the file is now {}", node.attr.size);
-                println!("DEBUG: getattr filetype: {:?}", node.attr.kind);
                 reply.attr(&TIMEOUT, &node.attr)
             }
             NodeKind::Directory { .. } => {
-                println!("getattr thinks is dir");
-                println!("DEBUG: getattr filetype: {:?}", node.attr.kind);
-
                 reply.attr(&TIMEOUT, &node.attr)
             }
             NodeKind::Symlink { .. } => {
@@ -180,7 +171,6 @@ impl Filesystem for RustyCloud {
         _crtime: Option<SystemTime>, _chgtime: Option<SystemTime>, _bkuptime: Option<SystemTime>, _flags: Option<BsdFileFlags>, reply: ReplyAttr) {
 
         println!("calling setattr");
-        println!("size was {:?}", size);
         let mut hash_m = self.f_node.lock().unwrap();
         let node = hash_m.get_mut(&ino).unwrap();
         //size can be none
@@ -203,8 +193,6 @@ impl Filesystem for RustyCloud {
 
     fn create(&self, _req: &Request, parent: INodeNo, name: &OsStr, _mode: u32, _umask: u32, _flags: i32, reply: ReplyCreate) {
         println!("calling create");
-        println!("parent INode {}", parent);
-        println!("name of file is {:?}", name);
         let mut node_map = self.f_node.lock().unwrap();
         let children = unwrap_parent_dir(&mut node_map, parent);
         //TODO: clean up var names
@@ -236,8 +224,8 @@ impl Filesystem for RustyCloud {
         node_map.insert(INodeNo(ino_num), new_f_node);
 
 
-        //WARNING: might not like 0 as file handle
-        reply.created(&TIMEOUT, &new_file_attr, Generation(0), FileHandle(0), FopenFlags::empty())
+        let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
+        reply.created(&TIMEOUT, &new_file_attr, Generation(0), FileHandle(fh), FopenFlags::empty())
 
     }
 
@@ -303,10 +291,8 @@ impl Filesystem for RustyCloud {
         //keep the other reference to it
         let file_node = node_map.get_mut(&INodeNo(ino_num)).unwrap();
         if file_node.attr.nlink > 1 {
-            println!("unlink: file had a link");
             file_node.attr.nlink -= 1;
         } else {
-            println!("unlink: file did not have a link");
             node_map.remove(&INodeNo(ino_num));
             self.free_inode.lock().unwrap().push(ino_num);
         }
@@ -323,13 +309,11 @@ impl Filesystem for RustyCloud {
         let new_name: String = String::from(newname.to_str().unwrap());
         match children.get_mut(&old_name) {
             Some(_) => {
-                println!("file moved in same parent dir");
                 let ino: u64 = children.remove(&old_name).unwrap(); 
                 if parent == newparent {
                     children.insert(new_name, ino);
                     reply.ok()
                 } else {
-                    println!("file moved to new dir");
                     let new_children = unwrap_parent_dir(&mut node_map, newparent);
                     new_children.insert(new_name, ino);
                     reply.ok();
@@ -344,22 +328,20 @@ impl Filesystem for RustyCloud {
 
     }
 
-    fn open(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
+    fn open(&self, req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
         println!("called open");
-        println!("flags are {:?}", flags);
 
         let mut node_map = self.f_node.lock().unwrap();
         let file_node = node_map.get_mut(&ino).unwrap();
-        file_node.current_opens += 1;
 
         let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
+        file_node.current_opens.push(FileHandle(fh));
+        println!("current opens after pushing {:?}", file_node.current_opens);
         reply.opened(FileHandle(fh), FopenFlags::empty());
     }
 
     fn read(&self, _req: &Request, ino: INodeNo, _fh: FileHandle, _offset: u64, _size: u32, 
         _flags: OpenFlags, _lock_owner: Option<LockOwner>, reply: ReplyData) {
-        //TODO: Implement
-        //NOTE: trying to read a file with size 0 does absolutely nothing
         println!("read called from from ino: {:?}", ino);
 
         let node_map = self.f_node.lock().unwrap();
@@ -367,8 +349,6 @@ impl Filesystem for RustyCloud {
         let file_node = node_map.get(&ino).unwrap();
         match &file_node.file_type {
             NodeKind::File { file_data } => {
-                println!("file is of size {}", file_node.attr.size);
-                println!("replying with {:?} as data", file_data);
                 reply.data(file_data);   
             }
             NodeKind::Directory { .. } => {
@@ -387,7 +367,6 @@ impl Filesystem for RustyCloud {
     fn readdir(&self, _req: &Request, ino: INodeNo, _fh: FileHandle, offset: u64, mut reply: ReplyDirectory) {
         //TODO: Break out of loop if add is full? and then call this function again
         println!("calling readdir on inode {}", ino);
-        println!("what is the offset? {}", offset);
         //ino is the current directory we are in
         //first get the parent 
 
@@ -397,8 +376,6 @@ impl Filesystem for RustyCloud {
         let child_files = children.clone();
         //string (name), u64 (inode)
         for (i, (name, ino)) in child_files.iter().enumerate().skip(offset as usize) {
-            println!("in loop, name: {}", name);
-            println!("in loop, ino: {}", ino);
             //now get the type of file it is 
             let file_node = node_map.get(&INodeNo(*ino)).unwrap();
             let ft = match file_node.file_type {
@@ -417,10 +394,9 @@ impl Filesystem for RustyCloud {
     }
 
     fn write(&self, _req: &Request, ino: INodeNo, _fh:FileHandle, _offset: u64, data: &[u8], 
-        write_flags: WriteFlags, _flags: OpenFlags, _lock_owner: Option<LockOwner>, reply: ReplyWrite) {
+        _write_flags: WriteFlags, _flags: OpenFlags, _lock_owner: Option<LockOwner>, reply: ReplyWrite) {
 
         println!("calling write");
-        println!("write flags are: {:?}", write_flags);
 
         //make sure that we are writing to a file not a dir
         let mut node_map = self.f_node.lock().unwrap();
@@ -432,7 +408,6 @@ impl Filesystem for RustyCloud {
                             file_data.push(*ch);
                         }
                         reply.written(data.len() as u32);
-                        node.current_opens -= 1;
                     }
                     NodeKind::Directory { .. } => {
                         println!("WRITE: can't write to a dir");
@@ -474,7 +449,7 @@ impl Filesystem for RustyCloud {
         }
     }
 
-    fn symlink (&self, _req: &Request, parent: INodeNo, link_name: &OsStr, target: &Path, reply: ReplyEntry) {
+    fn symlink (&self, req: &Request, parent: INodeNo, link_name: &OsStr, target: &Path, reply: ReplyEntry) {
         let mut node_map = self.f_node.lock().unwrap();
         println!("parent is {:?}", parent);
 
@@ -501,12 +476,15 @@ impl Filesystem for RustyCloud {
             blksize: 4096,
             flags: 0
         };
+        let mut cur_open: Vec<u32> = Vec::new();
+        cur_open.push(req.pid());
         let p_node = node_map.get(&parent).unwrap();
         let sym_node = FileNode {
             attr: sym_attr,
             file_type: NodeKind::Symlink { target_ino: String::from(target.to_str().unwrap()) }, 
             path: p_node.path.clone() + sym_str,
-            current_opens: 0
+            //WARNING: i don't know how this will work for symlinks
+            current_opens: Vec::new() 
  
         };
         node_map.insert(INodeNo(sym_ino), sym_node);
@@ -525,6 +503,26 @@ impl Filesystem for RustyCloud {
             println!("tried reading non symlink as symlink");
             reply.error(Errno::ENOENT)
         }
+    }
+    
+    fn release(&self, req: &Request, ino: INodeNo, fh: FileHandle, _flags: OpenFlags, _lock_owner: Option<LockOwner>,
+               _flush: bool, reply: ReplyEmpty) {
+        println!("releasing a file");
+        println!("releasing from fh {:?}", fh);
+        let mut node_map = self.f_node.lock().unwrap();
+        let node = node_map.get_mut(&ino).unwrap(); 
+        println!("releasing from file {:?}", node.path);
+        println!("current amount open: {:?}", node.current_opens);
+        let pid_index = match node.current_opens.binary_search(&fh) {
+            Ok(index) => index, 
+            Err(_) => {
+                println!("pid tried closing file it doesn't have open");
+                return reply.error(Errno::ENOENT)
+            }
+        };
+        node.current_opens.remove(pid_index);
+        println!("new amount open: {:?}", node.current_opens);
+        reply.ok()
     }
 }
 
