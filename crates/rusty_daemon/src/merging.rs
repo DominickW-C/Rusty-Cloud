@@ -1,6 +1,8 @@
 use crate::datatypes::{
     FileGrouped,
-    GroupType
+    GroupType,
+    FileNode,
+    NodeKind
 };
 
 fn find_file_lines(file: &[u8]) -> Vec<Vec<u8>> {
@@ -20,7 +22,13 @@ fn find_file_lines(file: &[u8]) -> Vec<Vec<u8>> {
     lines
 }
 
-pub fn split_by_changes(old_file_data: Vec<u8>, new_file_data: Vec<u8>) -> FileGrouped {
+pub fn split_by_changes(old_file: FileNode, new_file_data: Vec<u8>) -> FileGrouped {
+    let old_file_data = match old_file.file_type {
+        NodeKind::File { file_data } => file_data,
+        NodeKind::Directory { .. } | NodeKind::Symlink { .. } => {
+            panic!("splitting a nonfile")
+        }
+    };
     //vectors are array of ascii codes, need to split into lines
     let old_by_line: Vec<Vec<u8>> = find_file_lines(&old_file_data); 
     let new_by_line: Vec<Vec<u8>> = find_file_lines(&new_file_data); 
@@ -31,7 +39,8 @@ pub fn split_by_changes(old_file_data: Vec<u8>, new_file_data: Vec<u8>) -> FileG
     let mut text_group = FileGrouped {
         data_group: Vec::new(),
         group_type: Vec::new(),
-        group_breaks: Vec::new()
+        group_breaks: Vec::new(),
+        made_from: old_file.hash.unwrap()
     };
 
     let mut first_line_flag: bool = true;

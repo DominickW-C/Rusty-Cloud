@@ -27,6 +27,8 @@ use fuser::{
     TimeOrNow,
 };
 
+use sha2::{Sha256, Digest};
+
 use std::collections::HashMap;
 use core::time;
 use std::time::UNIX_EPOCH;
@@ -57,8 +59,7 @@ mod datatypes;
 use crate::datatypes::{
     FileNode,
     NodeKind,
-    RustyCloud,
-};
+    RustyCloud, };
 
 const TIMEOUT: time::Duration = time::Duration::new(2, 0);
 
@@ -88,7 +89,7 @@ impl RustyCloud {
             attr: root_attr,
             file_type: NodeKind::Directory { children: HashMap::new() },
             path: String::from("/"),
-            current_opens: Vec::new()
+            hash: None
         });
 
         Self { f_node, next_fh, next_inode, free_inode }
@@ -328,15 +329,9 @@ impl Filesystem for RustyCloud {
 
     }
 
-    fn open(&self, req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
+    fn open(&self, _req: &Request, _ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
         println!("called open");
-
-        let mut node_map = self.f_node.lock().unwrap();
-        let file_node = node_map.get_mut(&ino).unwrap();
-
         let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
-        file_node.current_opens.push(FileHandle(fh));
-        println!("current opens after pushing {:?}", file_node.current_opens);
         reply.opened(FileHandle(fh), FopenFlags::empty());
     }
 
@@ -407,6 +402,8 @@ impl Filesystem for RustyCloud {
                         for ch in data.iter() {
                             file_data.push(*ch);
                         }
+                        let file_hash = Sha256::digest(&file_data); 
+                        node.hash = Some(file_hash);
                         reply.written(data.len() as u32);
                     }
                     NodeKind::Directory { .. } => {
@@ -476,16 +473,12 @@ impl Filesystem for RustyCloud {
             blksize: 4096,
             flags: 0
         };
-        let mut cur_open: Vec<u32> = Vec::new();
-        cur_open.push(req.pid());
         let p_node = node_map.get(&parent).unwrap();
         let sym_node = FileNode {
             attr: sym_attr,
             file_type: NodeKind::Symlink { target_ino: String::from(target.to_str().unwrap()) }, 
             path: p_node.path.clone() + sym_str,
-            //WARNING: i don't know how this will work for symlinks
-            current_opens: Vec::new() 
- 
+            hash: None
         };
         node_map.insert(INodeNo(sym_ino), sym_node);
         reply.entry(&TIMEOUT, &sym_attr, Generation(0));
@@ -505,23 +498,9 @@ impl Filesystem for RustyCloud {
         }
     }
     
-    fn release(&self, req: &Request, ino: INodeNo, fh: FileHandle, _flags: OpenFlags, _lock_owner: Option<LockOwner>,
+    fn release(&self, _req: &Request, _ino: INodeNo, _fh: FileHandle, _flags: OpenFlags, _lock_owner: Option<LockOwner>,
                _flush: bool, reply: ReplyEmpty) {
         println!("releasing a file");
-        println!("releasing from fh {:?}", fh);
-        let mut node_map = self.f_node.lock().unwrap();
-        let node = node_map.get_mut(&ino).unwrap(); 
-        println!("releasing from file {:?}", node.path);
-        println!("current amount open: {:?}", node.current_opens);
-        let pid_index = match node.current_opens.binary_search(&fh) {
-            Ok(index) => index, 
-            Err(_) => {
-                println!("pid tried closing file it doesn't have open");
-                return reply.error(Errno::ENOENT)
-            }
-        };
-        node.current_opens.remove(pid_index);
-        println!("new amount open: {:?}", node.current_opens);
         reply.ok()
     }
 }
