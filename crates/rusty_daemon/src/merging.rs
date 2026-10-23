@@ -1,9 +1,22 @@
 use crate::datatypes::{
     FileGrouped,
     GroupType,
-    FileNode,
-    NodeKind
 };
+
+use sha2::{Sha256};
+
+//called to see if a merge was needed
+pub fn merge_needed(old_hash: sha2::digest::Output::<Sha256>, new_hash: sha2::digest::Output::<Sha256>) -> bool {
+    println!("old_hash was: {:?}", old_hash);
+    println!("old_hash was: {:?}", new_hash);
+
+    if old_hash == new_hash {
+        println!("same file, do nothing");
+        return false
+    }
+    println!("differenjt file, merge needed");
+    true
+}
 
 fn find_file_lines(file: &[u8]) -> Vec<Vec<u8>> {
     let mut lines: Vec<Vec<u8>> = Vec::new();
@@ -22,25 +35,19 @@ fn find_file_lines(file: &[u8]) -> Vec<Vec<u8>> {
     lines
 }
 
-pub fn split_by_changes(old_file: FileNode, new_file_data: Vec<u8>) -> FileGrouped {
-    let old_file_data = match old_file.file_type {
-        NodeKind::File { file_data } => file_data,
-        NodeKind::Directory { .. } | NodeKind::Symlink { .. } => {
-            panic!("splitting a nonfile")
-        }
-    };
+pub fn split_by_changes(old_file_data: Vec<u8>, new_file_data: Vec<u8>, from_hash: sha2::digest::Output<Sha256>) -> FileGrouped {
     //vectors are array of ascii codes, need to split into lines
     let old_by_line: Vec<Vec<u8>> = find_file_lines(&old_file_data); 
     let new_by_line: Vec<Vec<u8>> = find_file_lines(&new_file_data); 
     let mut old_iter = 0;
     let mut new_iter = 0;
 
-    //TODO: ACCOUNT DELETES
+    //TODO: ACCOUNT FOR DELETES
     let mut text_group = FileGrouped {
         data_group: Vec::new(),
         group_type: Vec::new(),
         group_breaks: Vec::new(),
-        made_from: old_file.hash.unwrap()
+        made_from: from_hash
     };
 
     let mut first_line_flag: bool = true;
@@ -109,4 +116,36 @@ pub fn split_by_changes(old_file: FileNode, new_file_data: Vec<u8>) -> FileGroup
 
     //i don't think it will actually return this but the error is annoying
     text_group
+}
+
+pub fn merge_file(old_file_group: &FileGrouped, new_file_group: &FileGrouped) -> Vec<u8> {
+    let mut ret_vec: Vec<u8> = Vec::new();
+
+    let mut old_it = 0;
+    let mut new_it = 0;
+
+    while old_it < old_file_group.data_group.len() && new_it < new_file_group.data_group.len() {
+        //check for new first, prioritize the new files new block first
+        if new_file_group.group_type[new_it] == GroupType::New {
+            ret_vec.extend_from_slice(&new_file_group.data_group[new_it]);
+            new_it += 1;
+            continue;
+        }
+
+        if new_file_group.group_type[new_it] == GroupType::Same {
+            if old_file_group.group_type[old_it] == GroupType::New {
+                ret_vec.extend_from_slice(&old_file_group.data_group[old_it]);
+                old_it += 1;
+                    
+            } else if old_file_group.group_type[old_it] == GroupType::Same { 
+                ret_vec.extend_from_slice(&old_file_group.data_group[old_it]);
+                old_it += 1;
+                new_it += 1;
+            } else {
+                panic!("merge found a delete and i haven't gotten there yet");
+            }
+        }
+    }
+
+    ret_vec
 }

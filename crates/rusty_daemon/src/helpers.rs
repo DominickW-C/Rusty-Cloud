@@ -53,15 +53,16 @@ pub fn new_file_node(new_attr: &FileAttr, parent_path: &str, node_name: &str) ->
                 attr: *new_attr,
                 file_type: NodeKind::Directory { children: HashMap::new() },
                 path: file_path,
-                hash: None
+                hash: None,
             };
         } 
         FileType::RegularFile => {
             let data_vec = Vec::new();
+            let hash = Sha256::digest(&data_vec);
             new_f_node = FileNode {
                 attr: *new_attr,
-                //WARNING: Might cause issues? hash has to be above file_type since both consume
-                hash: Some(Sha256::digest(&data_vec)), 
+                //WARNING: Might cause issues? hash has to be above file_type since both consume,
+                hash: Some(hash), 
                 file_type: NodeKind::File { file_data: data_vec },
                 path: file_path, 
             };
@@ -80,10 +81,7 @@ pub fn new_file_node(new_attr: &FileAttr, parent_path: &str, node_name: &str) ->
     Some(new_f_node)
 }
 
-//called to see if a merge was needed
-pub fn merge_needed() -> bool {
-    
-} 
+ 
 
 /*
  * works great but no use yet

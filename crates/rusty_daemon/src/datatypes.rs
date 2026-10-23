@@ -20,7 +20,7 @@ pub struct FileNode {
     pub attr: FileAttr,
     pub file_type: NodeKind,
     pub path: String,
-    pub hash: Option<sha2::digest::Output<Sha256>>
+    pub hash: Option<sha2::digest::Output<Sha256>>,
 }
 
 pub struct RustyCloud {
@@ -29,6 +29,8 @@ pub struct RustyCloud {
     pub free_inode: Mutex<Vec<u64>>,
     //TODO: make a free_fh
     pub next_fh: AtomicU64,
+
+    pub splits: Mutex<HashMap<sha2::digest::Output<Sha256>, FileGrouped>>
 }
 
 
