@@ -47,7 +47,8 @@ mod merging;
 use crate::merging:: {
     split_by_changes,
     merge_needed,
-    merge_file
+    merge_file,
+    regroup,
 };
 
 mod helpers;
@@ -122,7 +123,6 @@ impl fmt::Display for RustyCloud {
 impl Filesystem for RustyCloud {
 
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
-        println!("calling lookup for parent: {:?} name {:?}", parent, name);
         //find the parent file
         let mut node_map = self.f_node.lock().unwrap();
         let children = unwrap_parent_dir(&mut node_map, parent);
@@ -156,7 +156,6 @@ impl Filesystem for RustyCloud {
     }
 
     fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
-        println!("calling getattr for inode {:?}", ino);
         let mut node_map = self.f_node.lock().unwrap();
         let node = node_map.get_mut(&ino).unwrap();
         match &mut node.file_type {
@@ -177,7 +176,6 @@ impl Filesystem for RustyCloud {
         _attime: Option<TimeOrNow>, _mtime: Option<TimeOrNow>, _ctime: Option<SystemTime>, _fh: Option<FileHandle>, 
         _crtime: Option<SystemTime>, _chgtime: Option<SystemTime>, _bkuptime: Option<SystemTime>, _flags: Option<BsdFileFlags>, reply: ReplyAttr) {
 
-        println!("calling setattr");
         let mut hash_m = self.f_node.lock().unwrap();
         let node = hash_m.get_mut(&ino).unwrap();
         //size can be none
@@ -199,7 +197,6 @@ impl Filesystem for RustyCloud {
     }
 
     fn create(&self, _req: &Request, parent: INodeNo, name: &OsStr, _mode: u32, _umask: u32, _flags: i32, reply: ReplyCreate) {
-        println!("calling create");
         let mut node_map = self.f_node.lock().unwrap();
         let children = unwrap_parent_dir(&mut node_map, parent);
         //TODO: clean up var names
@@ -237,7 +234,6 @@ impl Filesystem for RustyCloud {
     }
 
     fn mkdir(&self, _req: &Request, parent: INodeNo, name: &OsStr, _mode: u32, _umask: u32, reply: ReplyEntry) {
-        println!("calling mkdir");
 
         let mut node_map = self.f_node.lock().unwrap();
         let children = unwrap_parent_dir(&mut node_map, parent);
@@ -274,8 +270,6 @@ impl Filesystem for RustyCloud {
     }
 
     fn rmdir(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
-        println!("calling rmdir");
-
         let mut node_map = self.f_node.lock().unwrap();
         let children = unwrap_parent_dir(&mut node_map, parent);
 
@@ -287,8 +281,6 @@ impl Filesystem for RustyCloud {
     }
 
     fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
-        println!("calling unlink");
-
         let mut node_map = self.f_node.lock().unwrap();
         let children = unwrap_parent_dir(&mut node_map, parent);
         let name_string = String::from(name.to_str().unwrap());
@@ -308,8 +300,6 @@ impl Filesystem for RustyCloud {
 
     fn rename(&self, _req: &Request, parent: INodeNo, name: &OsStr, newparent: INodeNo, 
         newname: &OsStr, _flags: RenameFlags, reply: ReplyEmpty) {
-        println!("calling rename");
-
         let mut node_map = self.f_node.lock().unwrap(); 
         let children = unwrap_parent_dir(&mut node_map, parent);
         let old_name: String = String::from(name.to_str().unwrap());
@@ -336,15 +326,12 @@ impl Filesystem for RustyCloud {
     }
 
     fn open(&self, _req: &Request, _ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
-        println!("called open");
         let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
         reply.opened(FileHandle(fh), FopenFlags::empty());
     }
 
     fn read(&self, _req: &Request, ino: INodeNo, _fh: FileHandle, _offset: u64, _size: u32, 
         _flags: OpenFlags, _lock_owner: Option<LockOwner>, reply: ReplyData) {
-        println!("read called from from ino: {:?}", ino);
-
         let node_map = self.f_node.lock().unwrap();
         //file def exists, just unwrap
         let file_node = node_map.get(&ino).unwrap();
@@ -367,9 +354,6 @@ impl Filesystem for RustyCloud {
 
     fn readdir(&self, _req: &Request, ino: INodeNo, _fh: FileHandle, offset: u64, mut reply: ReplyDirectory) {
         //TODO: Break out of loop if add is full? and then call this function again
-        println!("calling readdir on inode {}", ino);
-        //ino is the current directory we are in
-        //first get the parent 
 
         //hashmap of f_nodes
         let mut node_map = self.f_node.lock().unwrap();
@@ -397,8 +381,7 @@ impl Filesystem for RustyCloud {
     fn write(&self, _req: &Request, ino: INodeNo, _fh:FileHandle, _offset: u64, data: &[u8], 
         _write_flags: WriteFlags, _flags: OpenFlags, _lock_owner: Option<LockOwner>, reply: ReplyWrite) {
 
-        println!("calling write");
-
+        println!("write flags are {:?}", _write_flags);
         //make sure that we are writing to a file not a dir
         let mut node_map = self.f_node.lock().unwrap();
         let mut splits = self.splits.lock().unwrap();
@@ -407,31 +390,39 @@ impl Filesystem for RustyCloud {
                 match &mut node.file_type {
                     NodeKind::File { file_data } => {
                         //TODO: when something truncates a file the data by here is empty 
-                        let old_data = file_data.clone(); 
                         let old_hash = node.hash.unwrap();
                         //generates the new hash
                         let file_hash = Sha256::digest(data); 
 
                         match splits.get(&old_hash) {
                             Some(old_file_group) => {
-                                let new_file_group: FileGrouped = split_by_changes(old_data, data.to_vec(), file_hash);
+                                let old_data: Vec<u8> = regroup(old_file_group);
+                                println!("regroup was: {:?}", old_data);
+                                let new_file_group: FileGrouped = split_by_changes(old_file_group, data.to_vec(), file_hash);
+                                println!("new file group data was {:?}", new_file_group.data_group);
                                 let new_file_data: Vec<u8> = merge_file(old_file_group, &new_file_group);
                                 println!("new file data after merge was {:?}", new_file_data);
 
                                 splits.remove(&old_hash);
+                                println!("inserting hash into splits {:?}", file_hash);
                                 splits.insert(file_hash, new_file_group);
+                                //TODO: i don't think we are deleting old hashes yet
+                                node.hash = Some(file_hash);
 
                                 for ch in new_file_data.iter() {
                                     file_data.push(*ch);
                                 }
-                                reply.written(new_file_data.len() as u32);
+
+                                //gaslightsn text editors that they  wrote as much as expected
+                                reply.written(data.len() as u32);
+                                //reply.written(new_file_data.len() as u32);
                             },
                             None => {
+                                println!("was looking for hash {:?}", old_hash);
                                 //TODO: we are looking for a different split causing an error, find
                                 //the correct split to look for
                                 println!("assuming first file write");
-                                println!("our splits is {:?}", splits.keys());
-                                println!("we were looking for {:?}", old_hash);
+                                //this was the first file write so it will be one block of same
                                 let base_data = vec![data.to_vec()];
                                 let group_types = vec![GroupType::Same];
                                 let base_group = FileGrouped {
@@ -440,10 +431,15 @@ impl Filesystem for RustyCloud {
                                     group_breaks: Vec::new(),
                                     made_from: file_hash
                                 };
+
                                 splits.insert(file_hash, base_group);
+                                println!("instered {:?} into splits", file_hash);
                                 for ch in data.iter() {
                                     file_data.push(*ch);
                                 }
+
+                                //updated the file so we must update the current hah of it also
+                                node.hash = Some(file_hash);
 
                                 reply.written(data.len() as u32);
 
@@ -483,7 +479,6 @@ impl Filesystem for RustyCloud {
     }
 
     fn link(&self, _req: &Request, ino: INodeNo, newparent: INodeNo, newname: &OsStr, reply: ReplyEntry)  {
-        println!("making a hard link");
         let mut node_map = self.f_node.lock().unwrap();
         // ino is the file we are trying to link to a new parent
         // needs to be mutable to increment the links
@@ -507,7 +502,6 @@ impl Filesystem for RustyCloud {
 
     fn symlink (&self, _req: &Request, parent: INodeNo, link_name: &OsStr, target: &Path, reply: ReplyEntry) {
         let mut node_map = self.f_node.lock().unwrap();
-        println!("parent is {:?}", parent);
 
         let sym_ino: u64 = new_inode_no(self);
         let children = unwrap_parent_dir(&mut node_map, parent);
@@ -544,12 +538,10 @@ impl Filesystem for RustyCloud {
     }
 
     fn readlink(&self, _req: &Request, ino: INodeNo, reply: ReplyData) {
-        println!("calling readlink");
         let node_map = self.f_node.lock().unwrap();
         let link_node = &node_map.get(&ino).unwrap().file_type; 
 
         if let NodeKind::Symlink { target_ino } = link_node {
-            println!("readlink is replying with {:?}", target_ino);
             reply.data(target_ino.as_bytes());
         } else {
             println!("tried reading non symlink as symlink");
@@ -559,7 +551,6 @@ impl Filesystem for RustyCloud {
 
     fn release(&self, _req: &Request, _ino: INodeNo, _fh: FileHandle, _flags: OpenFlags, _lock_owner: Option<LockOwner>,
         _flush: bool, reply: ReplyEmpty) {
-        println!("releasing a file");
         reply.ok()
     }
 }
