@@ -551,6 +551,7 @@ dependencies = [
  "fuser",
  "libc",
  "log",
+ "regex",
  "sha2",
 ]
 

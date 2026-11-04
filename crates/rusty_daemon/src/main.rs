@@ -46,9 +46,7 @@ use std::sync::atomic::{
 mod merging;
 use crate::merging:: {
     split_by_changes,
-    merge_needed,
     merge_file,
-    regroup,
 };
 
 mod helpers;
@@ -75,6 +73,7 @@ impl RustyCloud {
         let free_inode = Mutex::new(Vec::new());
         let f_node = Mutex::new(HashMap::new());
         let splits = Mutex::new(HashMap::new());
+        let atomic_ino = Mutex::new(INodeNo(0));
         //start at 3 to avoid any in,out,err confusion
         let next_fh = AtomicU64::new(3);
         let root_attr = FileAttr {
@@ -99,7 +98,7 @@ impl RustyCloud {
             hash: None,
         });
 
-        Self { f_node, next_fh, next_inode, free_inode, splits }
+        Self { f_node, next_fh, next_inode, free_inode, splits, atomic_ino }
     }
 }
 
@@ -119,7 +118,6 @@ impl fmt::Display for RustyCloud {
         write!(f, "inode: {} \n size: {}\n", inode, size)
     }
 }
-
 impl Filesystem for RustyCloud {
 
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
@@ -197,6 +195,7 @@ impl Filesystem for RustyCloud {
     }
 
     fn create(&self, _req: &Request, parent: INodeNo, name: &OsStr, _mode: u32, _umask: u32, _flags: i32, reply: ReplyCreate) {
+        println!("creating a file");
         let mut node_map = self.f_node.lock().unwrap();
         let children = unwrap_parent_dir(&mut node_map, parent);
         //TODO: clean up var names
@@ -230,7 +229,6 @@ impl Filesystem for RustyCloud {
 
         let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
         reply.created(&TIMEOUT, &new_file_attr, Generation(0), FileHandle(fh), FopenFlags::empty())
-
     }
 
     fn mkdir(&self, _req: &Request, parent: INodeNo, name: &OsStr, _mode: u32, _umask: u32, reply: ReplyEntry) {
@@ -281,6 +279,7 @@ impl Filesystem for RustyCloud {
     }
 
     fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        println!("unlinking a file");
         let mut node_map = self.f_node.lock().unwrap();
         let children = unwrap_parent_dir(&mut node_map, parent);
         let name_string = String::from(name.to_str().unwrap());
@@ -300,13 +299,17 @@ impl Filesystem for RustyCloud {
 
     fn rename(&self, _req: &Request, parent: INodeNo, name: &OsStr, newparent: INodeNo, 
         newname: &OsStr, _flags: RenameFlags, reply: ReplyEmpty) {
+        println!("rename of a file is happening");
+        println!("new name is {:?}", newname);
         let mut node_map = self.f_node.lock().unwrap(); 
+        let mut a_ino = self.atomic_ino.lock().unwrap();
         let children = unwrap_parent_dir(&mut node_map, parent);
         let old_name: String = String::from(name.to_str().unwrap());
         let new_name: String = String::from(newname.to_str().unwrap());
         match children.get_mut(&old_name) {
             Some(_) => {
                 let ino: u64 = children.remove(&old_name).unwrap(); 
+                *a_ino = INodeNo(ino);
                 if parent == newparent {
                     children.insert(new_name, ino);
                     reply.ok()
@@ -314,6 +317,17 @@ impl Filesystem for RustyCloud {
                     let new_children = unwrap_parent_dir(&mut node_map, newparent);
                     new_children.insert(new_name, ino);
                     reply.ok();
+                }
+                //need to update the path of it also
+                match node_map.get_mut(&INodeNo(ino)) {
+                    Some(node) => {
+                        while node.path.pop().unwrap() != '/' {}
+                        node.path.push('/');
+                        node.path.insert_str(node.path.len(), newname.to_str().unwrap());
+                    }
+                    None => {
+                        println!("should never happen");
+                    }
                 }
             } 
             None => {
@@ -385,28 +399,74 @@ impl Filesystem for RustyCloud {
         //make sure that we are writing to a file not a dir
         let mut node_map = self.f_node.lock().unwrap();
         let mut splits = self.splits.lock().unwrap();
+
+        let atomic_ino = self.atomic_ino.lock().unwrap();
+        let mut atomic_path = String::new();
+        let mut atomic_hash: Option<sha2::digest::Output<Sha256>> = None; 
+
+        //writes when we are dealing with a text editor that does atomic file saves (vim)
+        match node_map.get_mut(&atomic_ino) {
+            Some(node) => {
+                println!("path of the found inode was ");
+                println!("{:?}", node.path);
+                //this is okayt because it is about to be deleted
+                node.path.pop().unwrap();
+                atomic_path = node.path.clone();
+                atomic_hash = node.hash;
+            }
+            None => {
+                println!("did not find an atomic inode");
+            }
+        }
+
         match node_map.get_mut(&ino) {
             Some(node) => {
                 match &mut node.file_type {
                     NodeKind::File { file_data } => {
-                        //TODO: when something truncates a file the data by here is empty 
-                        let old_hash = node.hash.unwrap();
+                        let mut old_hash = node.hash.unwrap();
+                        println!("looking for hash {:?}", old_hash);
                         //generates the new hash
                         let file_hash = Sha256::digest(data); 
 
-                        match splits.get(&old_hash) {
+                        //nothing happened, return 
+                        if file_hash == old_hash {
+                            reply.written(data.len() as u32);
+                            return;
+                        }
+                        //while this might seem unsafe, will only ever be equal if it found a node
+                        if node.path == atomic_path {
+                            println!("atomic file was saved");
+                            old_hash = atomic_hash.unwrap();
+                        }
+                        match splits.get_mut(&old_hash) {
                             Some(old_file_group) => {
-                                let old_data: Vec<u8> = regroup(old_file_group);
-                                println!("regroup was: {:?}", old_data);
-                                let new_file_group: FileGrouped = split_by_changes(old_file_group, data.to_vec(), file_hash);
-                                println!("new file group data was {:?}", new_file_group.data_group);
-                                let new_file_data: Vec<u8> = merge_file(old_file_group, &new_file_group);
-                                println!("new file data after merge was {:?}", new_file_data);
 
+                                //create a new group struct 
+                                let mut new_file_group: FileGrouped = split_by_changes(old_file_group, data.to_vec(), file_hash);
+                                //println!("new file group data was {:?}", new_file_group.data_group);
+
+
+                                let new_file_data: Vec<u8> = merge_file(old_file_group, &new_file_group);
+                                //println!("new file data after merge was {:?}", new_file_data);
+
+                                for ii in 0..old_file_group.group_type.len() {
+                                    for yy in 0..new_file_group.group_type.len() {
+                                            if old_file_group.data_group[ii] == new_file_group.data_group[yy] {
+                                                new_file_group.group_type[yy] = GroupType::Same;
+                                            } 
+                                    }
+                                }
+                                //remove the old hash from the list
                                 splits.remove(&old_hash);
+                                
+                                /*
+                                for ty in 0..new_file_group.group_type.len() {
+                                    new_file_group.group_type[ty] = GroupType::Same;
+
+                                }
+                                */
                                 println!("inserting hash into splits {:?}", file_hash);
                                 splits.insert(file_hash, new_file_group);
-                                //TODO: i don't think we are deleting old hashes yet
                                 node.hash = Some(file_hash);
 
                                 for ch in new_file_data.iter() {

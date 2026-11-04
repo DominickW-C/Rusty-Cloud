@@ -5,19 +5,6 @@ use crate::datatypes::{
 
 use sha2::{Sha256};
 
-//called to see if a merge was needed
-pub fn merge_needed(old_hash: sha2::digest::Output::<Sha256>, new_hash: sha2::digest::Output::<Sha256>) -> bool {
-    println!("old_hash was: {:?}", old_hash);
-    println!("old_hash was: {:?}", new_hash);
-
-    if old_hash == new_hash {
-        println!("same file, do nothing");
-        return false
-    }
-    println!("differenjt file, merge needed");
-    true
-}
-
 fn find_file_lines(file: &[u8]) -> Vec<Vec<u8>> {
     let mut lines: Vec<Vec<u8>> = Vec::new();
     let mut new_line: Vec<u8> = Vec::new();
@@ -60,11 +47,20 @@ fn find_current_group_type(file_group: &FileGrouped, current_line: usize) -> Gro
 }
 */
 
+//current problem:
+//when we are creating a new grouping, and encounter a new group in the old grouping,
+//we are going to start adding old stuff into a new group, since we are always going to
+//comapre to something that we will never see
+//NOTE: ONLY OUTPUT A SAME IF BOTH FILES SHARE IT
+//NOTE: OR REMOVE ALL NEW CHANGES FROM A OLD FILE, AND GO OFF THAT FOR THE NEW
+//WILL REQUIRE ME TO EVENTUALLY GET IT TO FLIP NEW TO OLD
 pub fn split_by_changes(old_file_group: &FileGrouped, new_file_data: Vec<u8>, from_hash: sha2::digest::Output<Sha256>) -> FileGrouped {
     let old_file_data = regroup(old_file_group); 
-    println!("old data gotten {:?}", old_file_data);
-    println!("new data gotten {:?}", new_file_data);
+    //println!("old data gotten {:?}", old_file_data);
+    //println!("new data gotten {:?}", new_file_data);
     //vectors are array of ascii codes, need to split into lines
+    //
+    //this should be only the original file since we are removing the new changes to split correctly
     let old_by_line: Vec<Vec<u8>> = find_file_lines(&old_file_data); 
     println!("old by line was {:?}", old_by_line);
     let new_by_line: Vec<Vec<u8>> = find_file_lines(&new_file_data); 
@@ -83,12 +79,19 @@ pub fn split_by_changes(old_file_group: &FileGrouped, new_file_data: Vec<u8>, fr
     let mut first_line_flag: bool = true;
     let mut new_group: Vec<u8> = Vec::new();
 
+    //make sure that empty files don't crash the FS
+    if old_file_group.group_type.is_empty() {
+        return text_group;
+    }
+
     //if the old file starts with new, jump to where it was the same
     //for this to work i need something to change things from new to old
-    
+    /*
+     * TODO: Commented out becasue there sould be no new anymore 
     if old_file_group.group_type[0] == GroupType::New {
         old_iter = old_file_group.group_breaks[0] - 1;
     }
+    */
   
     println!("old iter is now {}", old_iter);
     println!("what are our old data groups? {:?}", old_file_group.data_group);
@@ -106,6 +109,7 @@ pub fn split_by_changes(old_file_group: &FileGrouped, new_file_data: Vec<u8>, fr
             let group_type_size = text_group.group_type.len();
             //if we were in a same group, we have to clear it, if this isn't true, it was a new
             //group anyways
+            //TODO: causing a crash
             if text_group.group_type[group_type_size - 1] == GroupType::Same {
                 text_group.group_type.push(GroupType::New);
                 text_group.data_group.push(new_group.clone());
@@ -122,8 +126,16 @@ pub fn split_by_changes(old_file_group: &FileGrouped, new_file_data: Vec<u8>, fr
             old_iter += 1;
             continue;
         }
+        println!("old_iter: {}", old_iter);
+        println!("new_iter: {}", new_iter);
+        println!("old line: {:?}", old_by_line[old_iter]);
+        println!("new line: {:?}", new_by_line[new_iter]);
+        println!("group_type: {:?}", text_group.group_type);
+        println!("new_group: {:?}", new_group);
+
         //encountered a same line
         if old_by_line[old_iter] == new_by_line[new_iter] {
+            println!("LAST GROUP TYPE: {:?}", text_group.group_type.last());
             if first_line_flag {
                 new_group.extend_from_slice(&new_by_line[new_iter]);
                 text_group.group_type.push(GroupType::Same);
@@ -180,6 +192,7 @@ pub fn split_by_changes(old_file_group: &FileGrouped, new_file_data: Vec<u8>, fr
                 new_group.clear();
                 new_group.extend_from_slice(&new_by_line[new_iter]);
                 new_iter += 1;
+
                 text_group.group_breaks.push(new_iter);
                 continue;
             }
@@ -233,7 +246,7 @@ pub fn merge_file(old_file_group: &FileGrouped, new_file_group: &FileGrouped) ->
                 old_it += 1;
                     
             } else if old_file_group.group_type[old_it] == GroupType::Same { 
-                ret_vec.extend_from_slice(&old_file_group.data_group[old_it]);
+                ret_vec.extend_from_slice(&new_file_group.data_group[new_it]);
                 old_it += 1;
                 new_it += 1;
             } else {
@@ -245,11 +258,21 @@ pub fn merge_file(old_file_group: &FileGrouped, new_file_group: &FileGrouped) ->
     ret_vec
 }
 
+//temp??? fix to the merging issue
 pub fn regroup(file_group: &FileGrouped) -> Vec<u8> {
     let mut ret_vec = Vec::new();    
+    /*
     for group in file_group.data_group.iter() {
         ret_vec.extend_from_slice(group);
     } 
+    */
+
+    for ii in 0..file_group.data_group.len() {
+        if file_group.group_type[ii] == GroupType::New {
+            continue;
+        }
+        ret_vec.extend_from_slice(&file_group.data_group[ii]);
+    }
 
     ret_vec
 }

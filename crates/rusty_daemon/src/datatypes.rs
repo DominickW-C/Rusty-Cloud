@@ -1,11 +1,13 @@
 use fuser::{
     FileAttr,
+    INodeNo
 };
 
 use sha2::Sha256;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
+use std::fmt;
 
 pub enum NodeKind {
     //file data
@@ -30,15 +32,32 @@ pub struct RustyCloud {
     //TODO: make a free_fh
     pub next_fh: AtomicU64,
 
-    pub splits: Mutex<HashMap<sha2::digest::Output<Sha256>, FileGrouped>>
+    pub splits: Mutex<HashMap<sha2::digest::Output<Sha256>, FileGrouped>>,
+    pub atomic_ino: Mutex<INodeNo>
 }
 
-
+#[derive(Debug)]
 #[derive(PartialEq)]
 pub enum GroupType {
     Same,
     New,
     Deleted
+}
+
+impl fmt::Display for GroupType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            GroupType::Same => {
+                write!(f, "Grouping: Same")
+            },
+            GroupType::New => {
+                write!(f, "Grouping: New")
+            },
+            GroupType::Deleted => {
+                write!(f, "Grouping: Deleted")
+            },
+        }
+    }
 }
 
 pub struct FileGrouped {
