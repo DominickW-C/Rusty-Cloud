@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "crates/rusty_daemon",
-    "crates/rusty_cli", "crates/rusty_client",
+    "crates/rusty_cli",
 ]
 
 resolver = "2"

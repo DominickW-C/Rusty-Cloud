@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package rusty_net;
+
+service FsLookup {
+  rpc Lookup(LookupReq) returns (LookupRes); 
+}
+
+message LookupReq {
+  uint64 parent_ino = 1;
+  string file_name = 2;
+}
+
+message FileAttr {
+  uint64 ino = 1;
+  uint64 perm = 2;
+  uint64 size = 3;
+  uint64 blocks = 4;
+  uint64 uid = 5;
+  uint64 gid = 6;
+  //might need more?
+}
+
+message LookupRes {
+  bool found = 1; 
+  FileAttr attr = 2;
+}

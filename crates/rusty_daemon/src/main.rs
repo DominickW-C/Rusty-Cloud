@@ -43,6 +43,8 @@ use std::sync::atomic::{
     Ordering
 };
 
+use std::env;
+
 mod merging;
 use crate::merging:: {
     split_by_changes,
@@ -65,6 +67,11 @@ use crate::datatypes::{
     RustyCloud, 
 };
 
+use tonic;
+pub mod rusty_net {
+    tonic::include_proto!("rusty_net");
+}
+
 const TIMEOUT: time::Duration = time::Duration::new(2, 0);
 
 impl RustyCloud {
@@ -83,7 +90,9 @@ impl RustyCloud {
             atime: UNIX_EPOCH,
             mtime: UNIX_EPOCH,
             ctime: UNIX_EPOCH,
-            crtime: UNIX_EPOCH, kind: FileType::Directory, perm: 755,
+            crtime: UNIX_EPOCH, 
+            kind: FileType::Directory, 
+            perm: 755,
             nlink: 2,
             uid: 0,
             gid: 0,
@@ -616,27 +625,33 @@ impl Filesystem for RustyCloud {
 }
 
 fn main () {
-    //TODO: if the directory does not exist, make it
-    //path where the file will be mounted
-    let mountpoint = Path::new("/home/domc/rusty_cloud/fs_test");
-    //sets default options
-    let mut options = Config::default();
-    //changes the mount_options to auto unmount
-    options.mount_options = vec![
-        MountOption::AutoUnmount
-    ];
-    //lets any user access the filesystem
-    options.acl = SessionACL::All;
+    let args: Vec<String> = env::args().collect();
 
-    //mounts the filesystem
-    let mounted_fs = fuser::mount(RustyCloud::new(), mountpoint, &options);
+    if args.len() == 1 {
+        println!("starting for testing");
+        //TODO: if the directory does not exist, make it
+        //path where the file will be mounted
+        let mountpoint = Path::new("/home/domc/rusty_cloud/fs_test");
+        //sets default options
+        let mut options = Config::default();
+        //changes the mount_options to auto unmount
+        options.mount_options = vec![
+            MountOption::AutoUnmount
+        ];
+        //lets any user access the filesystem
+        options.acl = SessionACL::All;
 
-    //only called if there was an error when mounting
-    if let Err(e) = mounted_fs {
-        println!("error encounted when trying to mount the filesystem");
-        println!("{}", e);
+        //mounts the filesystem
+        let mounted_fs = fuser::mount(RustyCloud::new(), mountpoint, &options);
+
+        //only called if there was an error when mounting
+        if let Err(e) = mounted_fs {
+            println!("error encounted when trying to mount the filesystem");
+            println!("{}", e);
+        }
+    } else {
+        println!("connecting to server");
     }
-
 
     println!("test");
 }
