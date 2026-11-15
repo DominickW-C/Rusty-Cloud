@@ -1,3 +1,6 @@
+//TODO: fix a few syntax errors
+//update a few replies to make sure they are all set
+
 syntax = "proto3";
 
 package rusty_net;
@@ -24,4 +27,204 @@ message FileAttr {
 message LookupRes {
   bool found = 1; 
   FileAttr attr = 2;
+}
+
+service FsGetattr {
+  rpc Getattr(GetattrReq) returns (GetattrRes);
+}
+
+message GetattrReq {
+  uint64 ino = 1;
+}
+
+message GetattrRes {
+  bool found = 1;
+  FileAttr attr = 2;
+}
+
+service FsSetattr {
+  rpc Setattr(SetattrReq) returns (SetattrRes);
+}
+
+message SetattrReq {
+  uint64 ino = 1;
+  repeated uint64 size =2;
+}
+
+message SetattrRes {
+  bool found = 1;
+  FileAttr attr = 2;
+}
+
+service FsCreate {
+  rpc Create(CreateReq) returns (CreateRes);
+}
+
+message CreateReq {
+  uint64 ino = 1;
+  string name = 2;
+}
+
+//TODO: may have to fix this
+message CreateRes {
+  bool found = 1;
+  string resultPath = 2;
+  string strRet = 3;
+}
+
+service FsMkdir {
+  rpc Mkdir(MkdirReq) returns (MkdirRes);
+}
+
+message MkdirReq {
+  uint64 ino = 1;
+  string name = 2;
+}
+
+message MkdirRes {
+  bool found = 1;
+  FileAttr attr = 2;
+}
+
+service FsRmdir {
+  rpc Rmdir(RmdirReq) returns (RmdirRes);
+}
+
+message RmdirReq {
+  uint64 ino = 1;
+  string name = 2;
+}
+
+message RmdirRes {
+  bool found = 1;
+  FileAttr attr = 2;
+}
+
+service FsUnlink {
+  rpc Unlink(UnlinkReq) returns (UnlinkRes);
+}
+
+message UnlinkReq {
+  uint64 ino = 1;
+  string name = 2;
+  uint64 newIno = 3;
+  string newName = 4;
+}
+
+message UnlinkRes {
+  bool found = 1;
+}
+
+service FsRename {
+  rpc Rename(RenameReq) returns (RenameRes);
+}
+
+message RenameReq {
+  uint64 ino = 1;
+  string name = 2;
+  uint64 newIno = 3;
+  string newName = 4;
+}
+
+message RenameRes {
+  bool found = 1;   
+}
+
+//TODO: skipping open, shouldn't be needed?
+
+
+service FsRead {
+  rpc Read(ReadReq) returns (ReadRes);
+}
+
+message ReadReq {
+  uint64 ino = 1;
+}
+
+message ReadRes {
+  bool found = 1;
+  repeated uint64 data = 2;
+}
+
+service FsReaddir {
+  rpc Readdir(ReaddirReq) returns (ReaddirRes);
+}
+
+message ReaddirReq {
+  uint64 ino = 1;
+  uint64 offset = 2;
+}
+
+//TODO: I think this will be fine since the function ends with ok
+message ReaddirRes {
+  bool found = 1;
+}
+
+service FsWrite {
+  rpc Write(WriteReq) returns (WriteRes);
+}
+
+message WriteReq {
+  uint64 ino = 1;
+  repeated uint64 data = 2; 
+}
+
+message WriteRes {
+  bool found = 1;
+  uint64 len = 2;
+}
+
+service FsLink {
+  rpc Link(LinkReq) returns (LinkRes);
+}
+
+message LinkReq {
+  uint64 ino = 1;
+  uint64 newIno = 2;
+  string name = 3;
+}
+
+message LinkRes {
+  bool found = 1;
+  FileAttr attr = 2;
+}
+
+service FsSymlink {
+  rpc Symlink(SymlinkReq) returns (SymlinkRes);
+}
+
+message SymlinkReq {
+  uint64 ino = 1;
+  string name = 2;
+  string target = 3;
+}
+
+message SymlinkRes {
+  bool found = 1;
+  FileAttr attr = 2;
+}
+
+service FsReadlink {
+  rpc Readlink(ReadlinkReq) returns (ReadlinkRes);
+}
+
+message ReadlinkReq {
+  uint64 ino = 1;
+}
+
+message ReadlinkRes {
+  bool found = 1;
+}
+
+//TODO: may need just to confirm a close across systems?
+service FsRelease {
+  rpc Release(ReleaseReq) returns (ReleaseRes);
+}
+
+message ReleaseReq {
+  bool found = 1;
+}
+
+message ReleaseRes {
+  bool found = 1;
 }
