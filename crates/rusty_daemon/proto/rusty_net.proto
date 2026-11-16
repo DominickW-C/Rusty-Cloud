@@ -48,7 +48,7 @@ service FsSetattr {
 
 message SetattrReq {
   uint64 ino = 1;
-  repeated uint64 size =2;
+  repeated uint64 size = 2;
 }
 
 message SetattrRes {
@@ -68,8 +68,9 @@ message CreateReq {
 //TODO: may have to fix this
 message CreateRes {
   bool found = 1;
-  string resultPath = 2;
-  string strRet = 3;
+  FileAttr attr = 2;
+  string resultPath = 3;
+  string strRet = 4;
 }
 
 service FsMkdir {
@@ -107,8 +108,6 @@ service FsUnlink {
 message UnlinkReq {
   uint64 ino = 1;
   string name = 2;
-  uint64 newIno = 3;
-  string newName = 4;
 }
 
 message UnlinkRes {
@@ -132,7 +131,6 @@ message RenameRes {
 
 //TODO: skipping open, shouldn't be needed?
 
-
 service FsRead {
   rpc Read(ReadReq) returns (ReadRes);
 }
@@ -143,7 +141,7 @@ message ReadReq {
 
 message ReadRes {
   bool found = 1;
-  repeated uint64 data = 2;
+  bytes data = 2;
 }
 
 service FsReaddir {
@@ -155,9 +153,21 @@ message ReaddirReq {
   uint64 offset = 2;
 }
 
+//Filetype will be 0, 1, 2 relating
+//0: Directory
+//1: file
+//2: symlink
+message dirEntry {
+  uint64 ino = 1;
+  uint64 offset = 2;
+  uint32 fileType = 3;
+  string name = 4;
+}
+
 //TODO: I think this will be fine since the function ends with ok
 message ReaddirRes {
   bool found = 1;
+  repeated dirEntry dirEntries = 2;
 }
 
 service FsWrite {
@@ -166,7 +176,7 @@ service FsWrite {
 
 message WriteReq {
   uint64 ino = 1;
-  repeated uint64 data = 2; 
+  bytes data = 2; 
 }
 
 message WriteRes {
@@ -214,6 +224,7 @@ message ReadlinkReq {
 
 message ReadlinkRes {
   bool found = 1;
+  bytes data = 2; 
 }
 
 //TODO: may need just to confirm a close across systems?
@@ -222,7 +233,7 @@ service FsRelease {
 }
 
 message ReleaseReq {
-  bool found = 1;
+  uint64 ino = 1;
 }
 
 message ReleaseRes {

@@ -72,10 +72,41 @@ pub mod rusty_net {
     tonic::include_proto!("rusty_net");
 }
 
+use rusty_net::fs_lookup_server::{ FsLookup, FsLookupServer };
+use rusty_net::fs_lookup_client::FsLookupClient;
+use rusty_net::fs_getattr_server::{ FsGetattr, FsGetattrServer };
+use rusty_net::fs_getattr_client::FsGetattrClient;
+use rusty_net::fs_setattr_server::{ FsSetattr, FsSetattrServer };
+use rusty_net::fs_setattr_client::FsSetattrClient;
+use rusty_net::fs_create_server::{ FsCreate, FsCreateServer };
+use rusty_net::fs_create_client::FsCreateClient;
+use rusty_net::fs_mkdir_server::{ FsMkdir, FsMkdirServer };
+use rusty_net::fs_mkdir_client::FsMkdirClient;
+use rusty_net::fs_rmdir_server::{ FsRmdir, FsRmdirServer };
+use rusty_net::fs_rmdir_client::FsRmdirClient;
+use rusty_net::fs_unlink_server::{ FsUnlink, FsUnlinkServer };
+use rusty_net::fs_unlink_client::FsUnlinkClient;
+use rusty_net::fs_rename_server::{ FsRename, FsRenameServer };
+use rusty_net::fs_rename_client::FsRenameClient;
+use rusty_net::fs_read_server::{ FsRead, FsReadServer };
+use rusty_net::fs_read_client::FsReadClient;
+use rusty_net::fs_readdir_server::{ FsReaddir, FsReaddirServer };
+use rusty_net::fs_readdir_client::FsReaddirClient;
+use rusty_net::fs_write_server::{ FsWrite, FsWriteServer };
+use rusty_net::fs_write_client::FsWriteClient;
+use rusty_net::fs_link_server::{ FsLink, FsLinkServer };
+use rusty_net::fs_link_client::FsLinkClient;
+use rusty_net::fs_symlink_server::{ FsSymlink, FsSymlinkServer };
+use rusty_net::fs_symlink_client::FsSymlinkClient;
+use rusty_net::fs_readlink_server::{ FsReadlink, FsReadlinkServer };
+use rusty_net::fs_readlink_client::FsReadlinkClient;
+use rusty_net::fs_release_server::{ FsRelease, FsReleaseServer };
+use rusty_net::fs_release_client::FsReleaseClient;
+
 const TIMEOUT: time::Duration = time::Duration::new(2, 0);
 
 impl RustyCloud {
-    pub fn new() -> Self {
+    pub fn new(is_client: bool) -> Self {
         let next_inode =  Mutex::new(2);
         let free_inode = Mutex::new(Vec::new());
         let f_node = Mutex::new(HashMap::new());
@@ -107,7 +138,7 @@ impl RustyCloud {
             hash: None,
         });
 
-        Self { f_node, next_fh, next_inode, free_inode, splits, atomic_ino }
+        Self { f_node, next_fh, next_inode, free_inode, splits, atomic_ino, is_client }
     }
 }
 
@@ -642,7 +673,7 @@ fn main () {
         options.acl = SessionACL::All;
 
         //mounts the filesystem
-        let mounted_fs = fuser::mount(RustyCloud::new(), mountpoint, &options);
+        let mounted_fs = fuser::mount(RustyCloud::new(false), mountpoint, &options);
 
         //only called if there was an error when mounting
         if let Err(e) = mounted_fs {

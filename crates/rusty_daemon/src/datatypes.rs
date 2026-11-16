@@ -33,7 +33,8 @@ pub struct RustyCloud {
     pub next_fh: AtomicU64,
 
     pub splits: Mutex<HashMap<sha2::digest::Output<Sha256>, FileGrouped>>,
-    pub atomic_ino: Mutex<INodeNo>
+    pub atomic_ino: Mutex<INodeNo>,
+    pub is_client: bool
 }
 
 #[derive(Debug)]
