@@ -67,42 +67,6 @@ use crate::datatypes::{
     RustyCloud, 
 };
 
-use tonic;
-pub mod rusty_net {
-    tonic::include_proto!("rusty_net");
-}
-
-use rusty_net::fs_lookup_server::{ FsLookup, FsLookupServer };
-use rusty_net::fs_lookup_client::FsLookupClient;
-use rusty_net::fs_getattr_server::{ FsGetattr, FsGetattrServer };
-use rusty_net::fs_getattr_client::FsGetattrClient;
-use rusty_net::fs_setattr_server::{ FsSetattr, FsSetattrServer };
-use rusty_net::fs_setattr_client::FsSetattrClient;
-use rusty_net::fs_create_server::{ FsCreate, FsCreateServer };
-use rusty_net::fs_create_client::FsCreateClient;
-use rusty_net::fs_mkdir_server::{ FsMkdir, FsMkdirServer };
-use rusty_net::fs_mkdir_client::FsMkdirClient;
-use rusty_net::fs_rmdir_server::{ FsRmdir, FsRmdirServer };
-use rusty_net::fs_rmdir_client::FsRmdirClient;
-use rusty_net::fs_unlink_server::{ FsUnlink, FsUnlinkServer };
-use rusty_net::fs_unlink_client::FsUnlinkClient;
-use rusty_net::fs_rename_server::{ FsRename, FsRenameServer };
-use rusty_net::fs_rename_client::FsRenameClient;
-use rusty_net::fs_read_server::{ FsRead, FsReadServer };
-use rusty_net::fs_read_client::FsReadClient;
-use rusty_net::fs_readdir_server::{ FsReaddir, FsReaddirServer };
-use rusty_net::fs_readdir_client::FsReaddirClient;
-use rusty_net::fs_write_server::{ FsWrite, FsWriteServer };
-use rusty_net::fs_write_client::FsWriteClient;
-use rusty_net::fs_link_server::{ FsLink, FsLinkServer };
-use rusty_net::fs_link_client::FsLinkClient;
-use rusty_net::fs_symlink_server::{ FsSymlink, FsSymlinkServer };
-use rusty_net::fs_symlink_client::FsSymlinkClient;
-use rusty_net::fs_readlink_server::{ FsReadlink, FsReadlinkServer };
-use rusty_net::fs_readlink_client::FsReadlinkClient;
-use rusty_net::fs_release_server::{ FsRelease, FsReleaseServer };
-use rusty_net::fs_release_client::FsReleaseClient;
-
 const TIMEOUT: time::Duration = time::Duration::new(2, 0);
 
 impl RustyCloud {
@@ -655,7 +619,331 @@ impl Filesystem for RustyCloud {
     }
 }
 
-fn main () {
+use tonic::transport::Server;
+pub mod rusty_net {
+    tonic::include_proto!("rusty_net");
+}
+use rusty_net::*;
+
+use rusty_net::fs_lookup_server::{ FsLookup, FsLookupServer };
+use rusty_net::fs_lookup_client::FsLookupClient;
+
+#[derive(Debug, Default)]
+struct FsLookupService {}
+
+#[tonic::async_trait]
+impl FsLookup for FsLookupService {
+    async fn lookup(&self, request: tonic::Request<LookupReq>) 
+             -> Result<tonic::Response<LookupRes>, tonic::Status> {
+        println!("in server lookup");
+        let inputs = request.get_ref();
+
+        let respone = LookupRes {
+        };
+
+        Ok(tonic::Response::new(respone))
+    } 
+}
+
+use rusty_net::fs_getattr_server::{ FsGetattr, FsGetattrServer };
+use rusty_net::fs_getattr_client::FsGetattrClient;
+
+#[derive(Debug, Default)]
+struct FsGetattrService {}
+
+#[tonic::async_trait]
+impl FsGetattr for FsGetattrService {
+    async fn getattr(&self, request: tonic::Request<GetattrReq>)
+             -> Result<tonic::Response<GetattrRes>, tonic::Status> {
+        println!("in server getattr");
+        let inputs = request.get_ref();
+
+        let response = GetattrRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+}
+
+use rusty_net::fs_setattr_server::{ FsSetattr, FsSetattrServer };
+use rusty_net::fs_setattr_client::FsSetattrClient;
+
+#[derive(Debug, Default)]
+struct FsSetattrService{}
+
+#[tonic::async_trait]
+impl FsSetattr for FsSetattrService {
+    async fn setattr(&self, request: tonic::Request<SetattrReq>)
+             -> Result<tonic::Response<SetattrRes>, tonic::Status> {
+        println!("in server setattr");
+        let inputs = request.get_ref();
+
+        let response = SetattrRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+}
+
+use rusty_net::fs_create_server::{ FsCreate, FsCreateServer };
+use rusty_net::fs_create_client::FsCreateClient;
+
+#[derive(Debug, Default)]
+struct FsCreateService {}
+
+#[tonic::async_trait]
+impl FsCreate for FsCreateService {
+    async fn create(&self, request: tonic::Request<CreateReq>)
+             -> Result<tonic::Response<CreateRes>, tonic::Status> {
+        println!("in server create");
+        let inputs = request.get_ref();
+
+        let response = CreateRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+}
+
+use rusty_net::fs_mkdir_server::{ FsMkdir, FsMkdirServer };
+use rusty_net::fs_mkdir_client::FsMkdirClient;
+
+#[derive(Debug, Default)]
+struct FsMkdirService {}
+
+#[tonic::async_trait]
+impl FsMkdir for FsMkdirService {
+    async fn mkdir (&self, request: tonic::Request<MkdirReq>)
+             -> Result<tonic::Response<MkdirRes>, tonic::Status> {
+        println!("in server mkdir");
+        let inputs = request.get_ref();
+
+        let response = MkdirRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+}
+
+use rusty_net::fs_rmdir_server::{ FsRmdir, FsRmdirServer };
+use rusty_net::fs_rmdir_client::FsRmdirClient;
+
+#[derive(Debug, Default)]
+struct FsRmdirService {}
+
+#[tonic::async_trait]
+impl FsRmdir for FsRmdirService {
+    async fn rmdir(&self, request: tonic::Request<RmdirReq>)
+             -> Result<tonic::Response<RmdirRes>, tonic::Status> {
+        println!("in server rmdir");
+        let inputs = request.get_ref();
+
+        let response = RmdirRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+}
+
+use rusty_net::fs_unlink_server::{ FsUnlink, FsUnlinkServer };
+use rusty_net::fs_unlink_client::FsUnlinkClient;
+
+#[derive(Debug, Default)]
+struct FsUnlinkService {}
+
+#[tonic::async_trait]
+impl FsUnlink for FsUnlinkService {
+    async fn unlink(&self, request: tonic::Request<UnlinkReq>)
+             -> Result<tonic::Response<UnlinkRes>, tonic::Status> {
+        println!("in server unlink");
+        let inputs = request.get_ref();
+
+        let response = UnlinkRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+}
+
+use rusty_net::fs_rename_server::{ FsRename, FsRenameServer };
+use rusty_net::fs_rename_client::FsRenameClient;
+
+#[derive(Debug, Default)]
+struct FsRenameService {}
+
+#[tonic::async_trait]
+impl FsRename for FsRenameService {
+    async fn rename(&self, request: tonic::Request<RenameReq>)
+             -> Result<tonic::Response<RenameRes>, tonic::Status> {
+        println!("in server rename");
+        let inputs = request.get_ref();
+
+        let response = RenameRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+}
+
+use rusty_net::fs_read_server::{ FsRead, FsReadServer };
+use rusty_net::fs_read_client::FsReadClient;
+
+#[derive(Debug, Default)]
+struct FsReadService {}
+
+#[tonic::async_trait]
+impl FsRead for FsReadService {
+    async fn read(&self, request: tonic::Request<ReadReq>)
+             -> Result<tonic::Response<ReadRes>, tonic::Status> {
+        println!("in server read");
+        let inputs = request.get_ref();
+
+        let response = ReadRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+}
+
+use rusty_net::fs_readdir_server::{ FsReaddir, FsReaddirServer };
+use rusty_net::fs_readdir_client::FsReaddirClient;
+
+#[derive(Debug, Default)]
+struct FsReaddirService {}
+
+#[tonic::async_trait]
+impl FsReaddir for FsReaddirService {
+    async fn readdir(&self, request: tonic::Request<ReaddirReq>)
+             -> Result<tonic::Response<ReaddirRes>, tonic::Status> {
+        println!("in server readdir");
+        let inputs = request.get_ref();
+
+        let response = ReaddirRes {
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+}
+
+use rusty_net::fs_write_server::{ FsWrite, FsWriteServer };
+use rusty_net::fs_write_client::FsWriteClient;
+
+#[derive(Debug, Default)]
+struct FsWriteService {}
+
+#[tonic::async_trait]
+impl FsWrite for FsWriteService {
+    async fn write(&self, request: tonic::Request<WriteReq>)
+             -> Result<tonic::Response<WriteRes>, tonic::Status> {
+        println!("in server write");
+        let inputs = request.get_ref();
+
+        let response = WriteRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+
+    }
+}
+
+use rusty_net::fs_link_server::{ FsLink, FsLinkServer };
+use rusty_net::fs_link_client::FsLinkClient;
+
+#[derive(Debug, Default)]
+struct FsLinkService {}
+
+#[tonic::async_trait]
+impl FsLink for FsLinkService {
+    async fn link(&self, request: tonic::Request<LinkReq>)
+             -> Result<tonic::Response<LinkRes>, tonic::Status> {
+        println!("in server link");
+        let inputs = request.get_ref();
+
+        let response = LinkRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+
+    }
+}
+
+use rusty_net::fs_symlink_server::{ FsSymlink, FsSymlinkServer };
+use rusty_net::fs_symlink_client::FsSymlinkClient;
+
+#[derive(Debug, Default)]
+struct FsSymlinkService {}
+
+#[tonic::async_trait]
+impl FsSymlink for FsSymlinkService {
+    async fn symlink(&self, request: tonic::Request<SymlinkReq>)
+             -> Result<tonic::Response<SymlinkRes>, tonic::Status> {
+        println!("in server symlink");
+        let inputs = request.get_ref();
+
+        let response = SymlinkRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+
+    }
+}
+
+use rusty_net::fs_readlink_server::{ FsReadlink, FsReadlinkServer };
+use rusty_net::fs_readlink_client::FsReadlinkClient;
+
+#[derive(Debug, Default)]
+struct FsReadlinkService {}
+
+#[tonic::async_trait]
+impl FsReadlink for FsReadlinkService {
+    async fn readlink(&self, request: tonic::Request<ReadlinkReq>)
+             -> Result<tonic::Response<ReadlinkRes>, tonic::Status> {
+        println!("in server readlink");
+        let inputs = request.get_ref();
+
+        let response = ReadlinkRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+
+    }
+}
+
+use rusty_net::fs_release_server::{ FsRelease, FsReleaseServer };
+use rusty_net::fs_release_client::FsReleaseClient;
+
+#[derive(Debug, Default)]
+struct FsReleaseService {}
+
+#[tonic::async_trait]
+impl FsRelease for FsReleaseService {
+    async fn release(&self, request: tonic::Request<ReleaseReq>)
+             -> Result<tonic::Response<ReleaseRes>, tonic::Status> {
+        println!("in server release");
+        let inputs = request.get_ref();
+
+        let response = ReleaseRes {
+
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+}
+
+#[tokio::main]
+async fn main () -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
     if args.len() == 1 {
@@ -680,9 +968,50 @@ fn main () {
             println!("error encounted when trying to mount the filesystem");
             println!("{}", e);
         }
+        Ok(())
+    } else if args[2] == "host" {
+        let addr = "127.0.0.1".parse()?;
+
+        let net_lookup = FsLookupService::default();
+        let net_getattr = FsGetattrService::default();
+        let net_setattr = FsSetattrService::default();
+        let net_create = FsCreateService::default();
+        let net_mkdir = FsMkdirService::default();
+        let net_rmdir = FsRmdirService::default();
+        let net_unlink = FsUnlinkService::default();
+        let net_rename = FsRenameService::default();
+        let net_read = FsReadService::default();
+        let net_readdir = FsReaddirService::default();
+        let net_write = FsWriteService::default();
+        let net_link = FsLinkService::default();
+        let net_symlink = FsSymlinkService::default();
+        let net_readlink = FsReadlinkService::default();
+        let net_release = FsReleaseService::default();
+
+        Server::builder()
+            .add_service(FsLookupServer::new(net_lookup))
+            .add_service(FsGetattrServer::new(net_getattr))
+            .add_service(FsSetattrServer::new(net_setattr))
+            .add_service(FsCreateServer::new(net_create))
+            .add_service(FsMkdirServer::new(net_mkdir))
+            .add_service(FsRmdirServer::new(net_rmdir))
+            .add_service(FsUnlinkServer::new(net_unlink))
+            .add_service(FsRenameServer::new(net_rename))
+            .add_service(FsReadServer::new(net_read))
+            .add_service(FsReaddirServer::new(net_readdir))
+            .add_service(FsWriteServer::new(net_write))
+            .add_service(FsLinkServer::new(net_link))
+            .add_service(FsSymlinkServer::new(net_symlink))
+            .add_service(FsReadlinkServer::new(net_readlink))
+            .add_service(FsReleaseServer::new(net_release))
+            .serve(addr)
+            .await?;
+
+        Ok(())
+
+
     } else {
         println!("connecting to server");
+        Ok(())
     }
-
-    println!("test");
 }

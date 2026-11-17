@@ -941,6 +941,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "proto"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6c0b5c99ddbec6dd80d3aab67d98bcb446388a1709d8460be66543640a8ac11"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "pulldown-cmark"
 version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1066,6 +1077,7 @@ dependencies = [
  "libc",
  "log",
  "prost",
+ "proto",
  "regex",
  "sha2",
  "tokio",
